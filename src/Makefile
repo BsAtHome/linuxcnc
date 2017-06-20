@@ -832,7 +832,7 @@ hal_ppmc-objs := hal/drivers/hal_ppmc.o $(MATHSTUB)
 
 obj-$(CONFIG_HOSTMOT2) += hostmot2.o hm2_test.o hm2_pci.o hm2_7i43.o hm2_7i90.o setsserial.o
 ifeq ($(BUILD_SYS),uspace)
-obj-$(CONFIG_HOSTMOT2) += hm2_eth.o hm2_spi.o hm2_rpspi.o hal_bb_gpio.o
+obj-$(CONFIG_HOSTMOT2) += hm2_eth.o hm2_spi.o hm2_rpspi.o hm2_rpepp.o hal_bb_gpio.o
 endif
 hostmot2-objs :=			  \
     hal/drivers/mesa-hostmot2/hostmot2.o  \
@@ -875,6 +875,10 @@ hm2_spi-objs  :=			  \
     $(MATHSTUB)
 hm2_rpspi-objs  :=			  \
     hal/drivers/mesa-hostmot2/hm2_rpspi.o   \
+    $(MATHSTUB)
+hm2_rpepp-objs  :=			  \
+    hal/drivers/mesa-hostmot2/hm2_rpepp.o \
+    hal/drivers/mesa-hostmot2/bitfile.o   \
     $(MATHSTUB)
 hal_bb_gpio-objs  :=			  \
     hal/drivers/hal_bb_gpio.o		  \
@@ -1094,6 +1098,7 @@ endif
 ../rtlib/hm2_eth$(MODULE_EXT): $(addprefix objects/rt,$(hm2_eth-objs))
 ../rtlib/hm2_spi$(MODULE_EXT): $(addprefix objects/rt,$(hm2_spi-objs))
 ../rtlib/hm2_rpspi$(MODULE_EXT): $(addprefix objects/rt,$(hm2_rpspi-objs))
+../rtlib/hm2_rpepp$(MODULE_EXT): $(addprefix objects/rt,$(hm2_rpepp-objs))
 ../rtlib/hal_bb_gpio$(MODULE_EXT): $(addprefix objects/rt,$(hal_bb_gpio-objs))
 
 ifeq ($(TRIVIAL_BUILD),no)

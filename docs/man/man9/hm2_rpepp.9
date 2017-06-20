@@ -1,0 +1,141 @@
+.\" Copyright (c) 2017 B. Stultiens
+.\"
+.\" This is free documentation; you can redistribute it and/or
+.\" modify it under the terms of the GNU General Public License as
+.\" published by the Free Software Foundation; either version 2 of
+.\" the License, or (at your option) any later version.
+.\"
+.\" The GNU General Public License's references to "object code"
+.\" and "executables" are to be interpreted as the output of any
+.\" document formatting or typesetting system, including
+.\" intermediate and printed output.
+.\"
+.\" This manual is distributed in the hope that it will be useful,
+.\" but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\" GNU General Public License for more details.
+.\"
+.\" You should have received a copy of the GNU General Public
+.\" License along with this manual; if not, write to the Free
+.\" Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111,
+.\" USA.
+.TH HM2_RPEPP "9" "2017-06-17" "LinuxCNC Documentation" "HAL Component"
+.de TQ
+.br
+.ns
+.TP \\$1
+..
+
+.SH NAME
+
+hm2_rpepp \- LinuxCNC HAL driver for the Mesa Electronics EPP Anything IO
+boards, with HostMot2 firmware.
+
+.SH SYNOPSIS
+
+.HP
+.B loadrt hm2_rpepp
+.RS 4
+.TP
+\fBconfig\fR [default: ""]
+HostMot2 config strings, described in the
+.BR hostmot2 (9)
+manpage.
+
+.TP
+\fBepp_probe\fR [default: 1]
+Probe EPP ports for a board. This is a bit\-field indicating which ports should
+be probed:
+ \-  1 = EPP0,
+ \-  2 = EPP1,
+
+The probe is performed exactly in above order. Any boards found will be
+numbered 0...1 in the order found. See also
+.BR INTERFACE\ CONFGURATION
+below.
+It is an error if a probe fails and the driver will abort.
+
+.TP
+\fBboardid\fR [default: ""]
+A list of strings to force a specific board to be detected at a specific EPP
+port. The boardid list is in detection order. Valid strings (case sensitive):
+ \- MESA7I43
+ \- MESA7I90
+
+The boardid is only required if no firmware is programmed into the FPGA and the
+HostMot2 driver is required to download the firmware at initialization.
+
+.TP
+\fBepp_debug\fR [default: \-1]
+Set the message level of the running process. The message level is set if
+\fBepp_debug\fR is set to a positive value between 0 and 5, where 0 means no
+messages at all and 5 means everything. A value of \-1 does not touch the
+current message level.
+
+Caveat Emptor: changing the message level is process-wide and all modules
+within the process will spit out messages at the requested level. This may
+cause quite some clutter in your terminal.
+
+.SH DESCRIPTION
+
+hm2_rpepp is a device driver for the Raspberry Pi 2/3 that interfaces Mesa's
+EPP based Anything I/O boards (with the HostMot2 firmware) to the LinuxCNC HAL.
+This driver is not based on any linux driver, but on bit-banging the BCM2835
+GPIO pins.
+
+The supported boards are: 7I90HD, 7I43.
+
+The board should have a compatible firmware (f.ex. 7i90_epp_svst4_8.bit) loaded
+on the board by the
+.BR mesaflash (1)
+program.
+
+hm2_rpepp is only available when linuxcnc is configured with "uspace" realtime.
+It works with Raspian and PREEMPT_RT kernel (latest stable 4.4.4-rt9-v7+).
+
+.SH INTERFACE CONFIGURATION
+
+The EPP0/EPP1 peripherals are mapped to the following GPIO pins (with 40-pin
+I/O header pin\-number in parentheses):
+
+\fBEPP0\fR:
+ \- D0=22(15), D1=23(16), D2=27(13), D3=7(26)
+ \- D4=11(23), D5=10(19), D6=9(21), D7=8(24)
+ \- DS=24(18), AS=17(11), RW=25(22), WAIT=4(7)
+
+\fBEPP1\fR:
+ \- D0=13(33), D1=6(31), D2=5(29), D3=3(5)
+ \- D4=21(40), D5=20(37), D6=19(35), D7=18(12)
+ \- DS=26(37), AS=12(32), RW=16(36), WAIT=2(3)
+
+DS\ =\ Data\ Strobe; AS\ =\ Address\ Strobe; RW\ =\ Read/Write; WAIT\ =\ Ready/Wait.
+
+Please note that D4...D7 are shared with SPI ports (see
+.BR hm2_rpspi (9)
+) and you can use both EPP and SPI without interference as long as you use
+combination EPP0\ +\ SPI1\-CE0 or EPP1\ +\ SPI0\-CE0.
+
+Up to two devices are supported, each on its separate EPP port.
+
+.SH RPI NOTES
+It should be noted that the Rpi3 \fBmust\fR have an adequate 5V power supply
+and the power should be properly decoupled right on the 40\-pin I/O header. At
+high speeds and noise on the supply, there is the possibility of noise throwing
+off the SoC's PLL(s), resulting in strange behaviour or crashes.
+
+For optimal performance on the Rpi3, you must disable the "ondemand" CPU
+frequency governor. You may add the following to your /etc/rc.local file:
+ echo -n 1200000 > /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq
+ echo -n performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+
+Be sure to have a proper heatsink mounted on the SoC or it will get too warm
+and crash.
+
+.SH SEE ALSO
+
+.BR hostmot2 (9)
+.BR hm2_rpspi (9)
+
+.SH LICENSE
+
+GPL
