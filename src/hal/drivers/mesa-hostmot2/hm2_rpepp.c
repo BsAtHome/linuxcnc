@@ -47,7 +47,7 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 //#define RPEPP_GPIO_GUARD	1	// Define to protect GPIO indices
 
 #define RPEPP_MAX_BOARDS	2
-#define HM2_ADDR_AUTOINCR	0x8000
+#define HM2_ADDR_AUTOINCR	0x8000	// FIXME: This should go into hostmot2.h
 
 #ifndef _BV
 #define _BV(x)		(1 << (x))
@@ -87,7 +87,7 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 #define EPP0_PIN_DS		24	// pin 18 Data strobe (active low)
 #define EPP0_PIN_AS		17	// pin 11 Address strobe (active low)
 #define EPP0_PIN_RW		25	// pin 22 Read=1, write=0
-#define EPP0_PIN_WAIT		4	// pin  7 Input
+#define EPP0_PIN_WAIT		4	// pin  7 Input (active low)
 
 #define EPP1_PIN_D0		13	// pin 33
 #define EPP1_PIN_D1		6	// pin 31
@@ -100,7 +100,7 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 #define EPP1_PIN_DS		26	// pin 37 Data strobe (active low)
 #define EPP1_PIN_AS		12	// pin 32 Address strobe (active low)
 #define EPP1_PIN_RW		16	// pin 36 Read=1, write=0
-#define EPP1_PIN_WAIT		2	// pin  3 Input
+#define EPP1_PIN_WAIT		2	// pin  3 Input (active low)
 
 #define EPP0_DMASK	(	_BV(EPP0_PIN_D0) | _BV(EPP0_PIN_D1) | \
 				_BV(EPP0_PIN_D2) | _BV(EPP0_PIN_D3) | \
@@ -122,24 +122,28 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 // XXX: These MUST be updated if the pin-assignments change.
 //
 // Note that input is not defined here. The mask is used to zero the
-// appropriate FSEL bits and zero is the value neede for input.
+// appropriate FSEL bits and zero is the value needed for input.
 //
 #define RPEPP_GM		7			// FSEL Mask value
 #define RPEPP_GO		GPIO_FSEL_X_GPIO_OUTPUT	// FSEL output
 
-#define EPP0_FSEL_0_MASK	((RPEPP_GM << (3*(EPP0_PIN_D3 % 10))) | (RPEPP_GM << (3*(EPP0_PIN_D6 % 10))) | (RPEPP_GM << (3*(EPP0_PIN_D7 % 10))))
-#define EPP0_FSEL_1_MASK	((RPEPP_GM << (3*(EPP0_PIN_D5 % 10))) | (RPEPP_GM << (3*(EPP0_PIN_D4 % 10))))
-#define EPP0_FSEL_2_MASK	((RPEPP_GM << (3*(EPP0_PIN_D0 % 10))) | (RPEPP_GM << (3*(EPP0_PIN_D1 % 10))) | (RPEPP_GM << (3*(EPP0_PIN_D2 % 10))))
-#define EPP0_FSEL_0_OUT		((RPEPP_GO << (3*(EPP0_PIN_D3 % 10))) | (RPEPP_GO << (3*(EPP0_PIN_D6 % 10))) | (RPEPP_GO << (3*(EPP0_PIN_D7 % 10))))
-#define EPP0_FSEL_1_OUT		((RPEPP_GO << (3*(EPP0_PIN_D5 % 10))) | (RPEPP_GO << (3*(EPP0_PIN_D4 % 10))))
-#define EPP0_FSEL_2_OUT		((RPEPP_GO << (3*(EPP0_PIN_D0 % 10))) | (RPEPP_GO << (3*(EPP0_PIN_D1 % 10))) | (RPEPP_GO << (3*(EPP0_PIN_D2 % 10))))
+#define EPP_FSEL_VAL(base,pin)	((base) << (3*((pin) % 10)))
+#define EPP_FSEL_MSK(pin)	EPP_FSEL_VAL(RPEPP_GM, (pin))
+#define EPP_FSEL_OUT(pin)	EPP_FSEL_VAL(RPEPP_GO, (pin))
 
-#define EPP1_FSEL_0_MASK	((RPEPP_GM << (3*(EPP1_PIN_D1 % 10))) | (RPEPP_GM << (3*(EPP1_PIN_D2 % 10))) | (RPEPP_GM << (3*(EPP1_PIN_D3 % 10))))
-#define EPP1_FSEL_1_MASK	((RPEPP_GM << (3*(EPP1_PIN_D0 % 10))) | (RPEPP_GM << (3*(EPP1_PIN_D6 % 10))) | (RPEPP_GM << (3*(EPP1_PIN_D7 % 10))))
-#define EPP1_FSEL_2_MASK	((RPEPP_GM << (3*(EPP1_PIN_D4 % 10))) | (RPEPP_GM << (3*(EPP1_PIN_D5 % 10))))
-#define EPP1_FSEL_0_OUT		((RPEPP_GO << (3*(EPP1_PIN_D1 % 10))) | (RPEPP_GO << (3*(EPP1_PIN_D2 % 10))) | (RPEPP_GO << (3*(EPP1_PIN_D3 % 10))))
-#define EPP1_FSEL_1_OUT		((RPEPP_GO << (3*(EPP1_PIN_D0 % 10))) | (RPEPP_GO << (3*(EPP1_PIN_D6 % 10))) | (RPEPP_GO << (3*(EPP1_PIN_D7 % 10))))
-#define EPP1_FSEL_2_OUT		((RPEPP_GO << (3*(EPP1_PIN_D4 % 10))) | (RPEPP_GO << (3*(EPP1_PIN_D5 % 10))))
+#define EPP0_FSEL_0_MASK	(EPP_FSEL_MSK(EPP0_PIN_D3) | EPP_FSEL_MSK(EPP0_PIN_D6) | EPP_FSEL_MSK(EPP0_PIN_D7))
+#define EPP0_FSEL_1_MASK	(EPP_FSEL_MSK(EPP0_PIN_D5) | EPP_FSEL_MSK(EPP0_PIN_D4))
+#define EPP0_FSEL_2_MASK	(EPP_FSEL_MSK(EPP0_PIN_D0) | EPP_FSEL_MSK(EPP0_PIN_D1) | EPP_FSEL_MSK(EPP0_PIN_D2))
+#define EPP0_FSEL_0_OUT		(EPP_FSEL_OUT(EPP0_PIN_D3) | EPP_FSEL_OUT(EPP0_PIN_D6) | EPP_FSEL_OUT(EPP0_PIN_D7))
+#define EPP0_FSEL_1_OUT		(EPP_FSEL_OUT(EPP0_PIN_D5) | EPP_FSEL_OUT(EPP0_PIN_D4))
+#define EPP0_FSEL_2_OUT		(EPP_FSEL_OUT(EPP0_PIN_D0) | EPP_FSEL_OUT(EPP0_PIN_D1) | EPP_FSEL_OUT(EPP0_PIN_D2))
+
+#define EPP1_FSEL_0_MASK	(EPP_FSEL_MSK(EPP1_PIN_D1) | EPP_FSEL_MSK(EPP1_PIN_D2) | EPP_FSEL_MSK(EPP1_PIN_D3))
+#define EPP1_FSEL_1_MASK	(EPP_FSEL_MSK(EPP1_PIN_D0) | EPP_FSEL_MSK(EPP1_PIN_D6) | EPP_FSEL_MSK(EPP1_PIN_D7))
+#define EPP1_FSEL_2_MASK	(EPP_FSEL_MSK(EPP1_PIN_D4) | EPP_FSEL_MSK(EPP1_PIN_D5))
+#define EPP1_FSEL_0_OUT		(EPP_FSEL_OUT(EPP1_PIN_D1) | EPP_FSEL_OUT(EPP1_PIN_D2) | EPP_FSEL_OUT(EPP1_PIN_D3))
+#define EPP1_FSEL_1_OUT		(EPP_FSEL_OUT(EPP1_PIN_D0) | EPP_FSEL_OUT(EPP1_PIN_D6) | EPP_FSEL_OUT(EPP1_PIN_D7))
+#define EPP1_FSEL_2_OUT		(EPP_FSEL_OUT(EPP1_PIN_D4) | EPP_FSEL_OUT(EPP1_PIN_D5))
 
 #define EPP_PORT_0		0	// Identifiers for port selection. Must be
 #define EPP_PORT_1		1	// constants for inline to work effectively.
@@ -229,6 +233,9 @@ RTAPI_MP_INT(epp_debug, "Set message level for debugging purpose [0...5] where 0
  *
  * Byte->word conversion is faster using tables, which are created at startup.
  * The word->byte conversion is more tricky and tables are not a real option.
+ * The ARM instruction set is at our advantage allowing for conditional 'or',
+ * making the actual conversion only 16 register-register instructions. This
+ * would be much worse using the thumb instruction set.
  */
 RPEPP_ALWAYS_INLINE static inline uint8_t epp_port_to_data(unsigned port, uint32_t val)
 {
@@ -373,14 +380,28 @@ RPEPP_ALWAYS_INLINE static inline void gpio_fsel(uint32_t pin, uint32_t func)
  * The assumtpion here is that the FSEL registers have been setup properly
  * before these functions are called. That is the case here (see pins_setup()
  * below).
+ *
+ * We control the R/W pin here too. This allows for a bi-directional buffer to
+ * be attached on the data-lines and it switches properly timed on basis of the
+ * R/W pin. The actual control of the buffer may be slightly more difficult.
+ * The buffer enable, as seen from the host (this machine), could be:
+ *	/CE = RW * /WAIT = /(/RW + WAIT)
+ * An additional buffer should be used to handle the control-lines.
+ *
+ * It is also possible to ignore the WAIT signal and to enable the buffer all
+ * the time, only controlling the direction with RW. The tricky part is to
+ * ensure that the slave side has its buffers in the right direction at the
+ * same time.
  */
 RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_output(unsigned port)
 {
 	if(!port) {
+		reg_wr(&gpio->gpclr0, _BV(EPP0_PIN_RW));		// Clear R/W
 		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) | EPP0_FSEL_0_OUT);
 		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) | EPP0_FSEL_1_OUT);
 		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) | EPP0_FSEL_2_OUT);
 	} else {
+		reg_wr(&gpio->gpclr0, _BV(EPP1_PIN_RW));		// Clear R/W
 		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) | EPP1_FSEL_0_OUT);
 		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) | EPP1_FSEL_1_OUT);
 		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) | EPP1_FSEL_2_OUT);
@@ -393,10 +414,12 @@ RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_input(unsigned port)
 		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) & ~EPP0_FSEL_0_MASK);
 		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) & ~EPP0_FSEL_1_MASK);
 		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) & ~EPP0_FSEL_2_MASK);
+		reg_wr(&gpio->gpset0, _BV(EPP0_PIN_RW));		// Set R/W
 	} else {
 		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) & ~EPP1_FSEL_0_MASK);
 		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) & ~EPP1_FSEL_1_MASK);
 		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) & ~EPP1_FSEL_2_MASK);
+		reg_wr(&gpio->gpset0, _BV(EPP1_PIN_RW));		// Set R/W
 	}
 }
 
@@ -433,17 +456,17 @@ RPEPP_ALWAYS_INLINE static inline void epp_assert_strobe(unsigned port, bool ad_
 	}
 }
 
-#define TIMEOUT_SPINS	1000	// Many clock cycles (>80 us)
+#define TIMEOUT_SPINS	1000	// Many clock cycles (>80 us; spec says ~10 us)
 
 RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(unsigned port, uint8_t data, bool ad_strobe)
 {
-	// It is assumed that the data port is set to output at this time
+	// It is assumed that the data port is set to output at this time and
+	// the R/W pin is set low
 	uint32_t portdata;
 	unsigned timeout;
 
 	portdata = epp_data_to_port(port, data);
 
-	reg_wr(&gpio->gpclr0, _BV(port ? EPP1_PIN_RW : EPP0_PIN_RW));		// Clear R/W
 	reg_wr(&gpio->gpclr0, portdata ^ (port ? EPP1_DMASK : EPP0_DMASK));	// Clear data bits to clear
 	reg_wr(&gpio->gpset0, portdata);					// Set data bits to set
 
@@ -474,11 +497,10 @@ RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(unsigned port, uint8_t da
 
 RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *data, bool ad_strobe)
 {
-	// It is assumed that the data port is set to input at this time
+	// It is assumed that the data port is set to input at this time and
+	// teh R/W pin set high
 	uint32_t portdata;
 	unsigned timeout;
-
-	reg_wr(&gpio->gpset0, _BV(port ? EPP1_PIN_RW : EPP0_PIN_RW));	// Set R/W
 
 	// Wait for the WAIT line to be(come) low
 	timeout = TIMEOUT_SPINS;
@@ -528,6 +550,7 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *da
 RPEPP_ALWAYS_INLINE static inline bool epp_addr_write16(unsigned port, uint16_t val)
 {
 	// Write two bytes to address port in lo-hi-byte order
+	// The data port must have been set to output
 	if(!epp_write_cycle(port, val & 0xff, true)) {
 		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.addr_write16: Write timeout on address write byte 0\n", port);
 		return false;
@@ -542,6 +565,7 @@ RPEPP_ALWAYS_INLINE static inline bool epp_addr_write16(unsigned port, uint16_t 
 RPEPP_ALWAYS_INLINE static inline bool epp_addr_write8(unsigned port, uint8_t val)
 {
 	// Write a single byte to address port
+	// The data port must have been set to output
 	if(!epp_write_cycle(port, val & 0xff, true)) {
 		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.addr_write8: Write timeout\n", port);
 		return false;
@@ -552,6 +576,7 @@ RPEPP_ALWAYS_INLINE static inline bool epp_addr_write8(unsigned port, uint8_t va
 RPEPP_ALWAYS_INLINE static inline bool epp_data_write8(unsigned port, uint8_t val)
 {
 	// Write a single byte to data port
+	// The data port must have been set to output
 	if(!epp_write_cycle(port, val, false)) {
 		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.data_write8: Write timeout\n", port);
 		return false;
@@ -1057,6 +1082,15 @@ static void pins_restore(const pinsetup_t *pinsetup, unsigned n)
 	}
 }
 
+/*
+ * Only EPP 1.9 requires the WAIT line to be low to start a cycle. Older
+ * versions (EPP 1.7, pre IEEE 1284) state that the cycle may start while WAIT
+ * is high. However, doing so would not permit us to have a complete handshake
+ * for each and every transfer.
+ * The distinction is not problem here since we only interface with known
+ * hardware. It would seem that adding all variants is superfluous. We simply
+ * force the handshake to comply to EPP 1.9 and complain if we meet resistance.
+ */
 #define TIMEOUT_SPIN_WAITPIN	125000		// Many cycles >10 ms
 static void peripheral_setup(void)
 {
