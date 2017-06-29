@@ -39,7 +39,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("B. Stultiens");
 MODULE_DESCRIPTION("Driver for HostMot2 devices connected via EPP on the RaspberryPi");
-MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
+MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90,Mesa-AnythingIO-7i43");
 
 // Forced inline expansion
 #define RPEPP_ALWAYS_INLINE	__attribute__((always_inline))
@@ -47,7 +47,6 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 //#define RPEPP_GPIO_GUARD	1	// Define to protect GPIO indices
 
 #define RPEPP_MAX_BOARDS	2
-#define HM2_ADDR_AUTOINCR	0x8000	// FIXME: This should go into hostmot2.h
 
 #ifndef _BV
 #define _BV(x)		(1 << (x))
@@ -102,16 +101,6 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 #define EPP1_PIN_RW		16	// pin 36 Read=1, write=0
 #define EPP1_PIN_WAIT		2	// pin  3 Input (active low)
 
-#define EPP0_DMASK	(	_BV(EPP0_PIN_D0) | _BV(EPP0_PIN_D1) | \
-				_BV(EPP0_PIN_D2) | _BV(EPP0_PIN_D3) | \
-				_BV(EPP0_PIN_D4) | _BV(EPP0_PIN_D5) | \
-				_BV(EPP0_PIN_D6) | _BV(EPP0_PIN_D7))
-
-#define EPP1_DMASK	(	_BV(EPP1_PIN_D0) | _BV(EPP1_PIN_D1) | \
-				_BV(EPP1_PIN_D2) | _BV(EPP1_PIN_D3) | \
-				_BV(EPP1_PIN_D4) | _BV(EPP1_PIN_D5) | \
-				_BV(EPP1_PIN_D6) | _BV(EPP1_PIN_D7))
-
 // The FSEL values are combined into three register access values for
 // gpfsel[0..2]. A shortcut is taken for input, which value is zero.
 //
@@ -119,39 +108,30 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90");
 // Therefore, all GPIOs are always contained within the first three gpfsel
 // registers.
 //
-// XXX: These MUST be updated if the pin-assignments change.
-//
-// Note that input is not defined here. The mask is used to zero the
+// Note that "input" is not defined here. The mask is used to zero the
 // appropriate FSEL bits and zero is the value needed for input.
 //
 #define RPEPP_GM		7			// FSEL Mask value
 #define RPEPP_GO		GPIO_FSEL_X_GPIO_OUTPUT	// FSEL output
 
-#define EPP_FSEL_VAL(base,pin)	((base) << (3*((pin) % 10)))
-#define EPP_FSEL_MSK(pin)	EPP_FSEL_VAL(RPEPP_GM, (pin))
-#define EPP_FSEL_OUT(pin)	EPP_FSEL_VAL(RPEPP_GO, (pin))
-
-#define EPP0_FSEL_0_MASK	(EPP_FSEL_MSK(EPP0_PIN_D3) | EPP_FSEL_MSK(EPP0_PIN_D6) | EPP_FSEL_MSK(EPP0_PIN_D7))
-#define EPP0_FSEL_1_MASK	(EPP_FSEL_MSK(EPP0_PIN_D5) | EPP_FSEL_MSK(EPP0_PIN_D4))
-#define EPP0_FSEL_2_MASK	(EPP_FSEL_MSK(EPP0_PIN_D0) | EPP_FSEL_MSK(EPP0_PIN_D1) | EPP_FSEL_MSK(EPP0_PIN_D2))
-#define EPP0_FSEL_0_OUT		(EPP_FSEL_OUT(EPP0_PIN_D3) | EPP_FSEL_OUT(EPP0_PIN_D6) | EPP_FSEL_OUT(EPP0_PIN_D7))
-#define EPP0_FSEL_1_OUT		(EPP_FSEL_OUT(EPP0_PIN_D5) | EPP_FSEL_OUT(EPP0_PIN_D4))
-#define EPP0_FSEL_2_OUT		(EPP_FSEL_OUT(EPP0_PIN_D0) | EPP_FSEL_OUT(EPP0_PIN_D1) | EPP_FSEL_OUT(EPP0_PIN_D2))
-
-#define EPP1_FSEL_0_MASK	(EPP_FSEL_MSK(EPP1_PIN_D1) | EPP_FSEL_MSK(EPP1_PIN_D2) | EPP_FSEL_MSK(EPP1_PIN_D3))
-#define EPP1_FSEL_1_MASK	(EPP_FSEL_MSK(EPP1_PIN_D0) | EPP_FSEL_MSK(EPP1_PIN_D6) | EPP_FSEL_MSK(EPP1_PIN_D7))
-#define EPP1_FSEL_2_MASK	(EPP_FSEL_MSK(EPP1_PIN_D4) | EPP_FSEL_MSK(EPP1_PIN_D5))
-#define EPP1_FSEL_0_OUT		(EPP_FSEL_OUT(EPP1_PIN_D1) | EPP_FSEL_OUT(EPP1_PIN_D2) | EPP_FSEL_OUT(EPP1_PIN_D3))
-#define EPP1_FSEL_1_OUT		(EPP_FSEL_OUT(EPP1_PIN_D0) | EPP_FSEL_OUT(EPP1_PIN_D6) | EPP_FSEL_OUT(EPP1_PIN_D7))
-#define EPP1_FSEL_2_OUT		(EPP_FSEL_OUT(EPP1_PIN_D4) | EPP_FSEL_OUT(EPP1_PIN_D5))
-
-#define EPP_PORT_0		0	// Identifiers for port selection. Must be
-#define EPP_PORT_1		1	// constants for inline to work effectively.
-
 typedef struct hm2_rpepp_struct {
 	hm2_lowlevel_io_t llio;		// Upstream container
 	int		nr;		// Board number
 	int		eppid;		// Which port is mapped
+	uint32_t	msk_data[8];	// Individual data bit masks
+	uint32_t	msk_alldata;	// All data bits in one mask
+	uint32_t	msk_rw;		// RW bit mask
+	uint32_t	msk_as;		// AS bit mask
+	uint32_t	msk_ds;		// DS bit mask
+	uint32_t	msk_wait;	// WAIT bit mask
+	uint32_t	fsel_msk[3];	// Input/output switch (and-mask)
+	uint32_t	fsel_out[3];	// Input/output switch (or-mask)
+	uint32_t	bytetable[256];	// Bit translation table (input -> data byte)
+	int		pin_data[8];	// GPIO pins belonging to this port
+	int		pin_rw;
+	int		pin_as;
+	int		pin_ds;
+	int		pin_wait;
 } hm2_rpepp_t;
 
 typedef enum {
@@ -195,18 +175,46 @@ static int epp_probe = RPEPP_PROBE_0;
 RTAPI_MP_INT(epp_probe, "Bitmask of EPP ports to probe; 1=EPP0, 2=EPP1 (default: 1 = EPP0)")
 
 /*
- * boardid[]: define the attached board if it cannot be probed
+ * pin_*[]: EPP data port and control signal GPIO pin connection mapping. The
+ * defaults are documented above and in in hm2_rpepp(9).
+ */
+static int pin_data[8*RPEPP_MAX_BOARDS] = {
+	EPP0_PIN_D0, EPP0_PIN_D1, EPP0_PIN_D2, EPP0_PIN_D3,
+	EPP0_PIN_D4, EPP0_PIN_D5, EPP0_PIN_D6, EPP0_PIN_D7,
+	EPP1_PIN_D0, EPP1_PIN_D1, EPP1_PIN_D2, EPP1_PIN_D3,
+	EPP1_PIN_D4, EPP1_PIN_D5, EPP1_PIN_D6, EPP1_PIN_D7,
+};
+static int pin_ds[1*RPEPP_MAX_BOARDS] = {EPP0_PIN_DS, EPP1_PIN_DS};
+static int pin_as[1*RPEPP_MAX_BOARDS] = {EPP0_PIN_AS, EPP1_PIN_AS};
+static int pin_rw[1*RPEPP_MAX_BOARDS] = {EPP0_PIN_RW, EPP1_PIN_RW};
+static int pin_wait[1*RPEPP_MAX_BOARDS] = {EPP0_PIN_WAIT, EPP1_PIN_WAIT};
+RTAPI_MP_ARRAY_INT(pin_data, NELEM(pin_data), "Data GPIO pins (comma separated). For defaults see hm2_rpepp(9)")
+RTAPI_MP_ARRAY_INT(pin_ds,   NELEM(pin_ds),   "Data strobe GPIO pins (comma separated). For defaults see hm2_rpepp(9)")
+RTAPI_MP_ARRAY_INT(pin_as,   NELEM(pin_as),   "Address strobe GPIO pins (comma separated). For defaults see hm2_rpepp(9)")
+RTAPI_MP_ARRAY_INT(pin_rw,   NELEM(pin_rw),   "Read/write GPIO pins (comma separated). For defaults see hm2_rpepp(9)")
+RTAPI_MP_ARRAY_INT(pin_wait, NELEM(pin_wait), "Wait GPIO pins (comma separated). For defaults see hm2_rpepp(9)")
+
+/*
+ * epp_spi_check: Enable/disable checking overlap between EPP and SPI mappings.
+ * SPI lines must be connected to a specific location or there is a possibility
+ * that hm2_rpspi and hm2_rpepp bite each other.
+ */
+static int epp_spi_check = 1;
+RTAPI_MP_INT(epp_spi_check, "Check whether EPP pin definitions overlap SPI port pins (default 1, enabled)")
+
+/*
+ * boardids[]: define the attached board if it cannot be probed
  * Supported values are (case sensitive):
  * - MESA7I90
  * - MESA7I43
  */
-static char *boardid[RPEPP_MAX_BOARDS];
-RTAPI_MP_ARRAY_STRING(boardid, RPEPP_MAX_BOARDS, "Board identifiers (comma separated) if it cannot be probed due to lack of firmware (default: not set)")
+static char *boardids[RPEPP_MAX_BOARDS];
+RTAPI_MP_ARRAY_STRING(boardids, RPEPP_MAX_BOARDS, "Board identifiers (comma separated) if it cannot be probed due to lack of firmware (default: not set)")
 
 /*
- * Set the message level for debugging purpose. This has the (side-)effect that
- * all modules within this process will start spitting out messages at the
- * requested level.
+ * epp_debug: Set the message level for debugging purpose. This has the
+ * (side-)effect that all modules within this process will start spitting out
+ * messages at the requested level.
  * The upstream message level is not touched if epp_debug == -1.
  */
 static int epp_debug = -1;
@@ -215,15 +223,9 @@ RTAPI_MP_INT(epp_debug, "Set message level for debugging purpose [0...5] where 0
 /*
  * Code comments:
  * All conversion and support routines are forced to expand inline because they
- * are rather timing sensitive in the read/write loops.
- *
- * Many routines are duplicated for EPP0 and EPP1. The reason for duplication
- * is that they must call upstream (inline) functions with constants. Using
- * constants in inline expansions allows the compiler to eliminate dead code
- * and reduce conditionals to only the fraction that is actually executed.
- *
- * Inline functions here preserve the functional abstraction without the
- * overhead of calling functions.
+ * are rather timing sensitive in the read/write loops. Inline functions here
+ * preserve the functional abstraction without the overhead of calling
+ * functions.
  */
 
 /*
@@ -234,59 +236,45 @@ RTAPI_MP_INT(epp_debug, "Set message level for debugging purpose [0...5] where 0
  * Byte->word conversion is faster using tables, which are created at startup.
  * The word->byte conversion is more tricky and tables are not a real option.
  * The ARM instruction set is at our advantage allowing for conditional 'or',
- * making the actual conversion only 16 register-register instructions. This
- * would be much worse using the thumb instruction set.
+ * making the actual conversion 16 register-register and 8 memory-register
+ * instructions. The memory accesses are scheduled to overlap and it will all
+ * be cached after the first loop. This would be much worse using the thumb
+ * instruction set.
  */
-RPEPP_ALWAYS_INLINE static inline uint8_t epp_port_to_data(unsigned port, uint32_t val)
+RPEPP_ALWAYS_INLINE static inline uint8_t epp_port_to_data(const hm2_rpepp_t *port, uint32_t val)
 {
 	uint8_t data = 0;
-	if(!port) {
-		if(val & _BV(EPP0_PIN_D0))	data |= 0x01;
-		if(val & _BV(EPP0_PIN_D1))	data |= 0x02;
-		if(val & _BV(EPP0_PIN_D2))	data |= 0x04;
-		if(val & _BV(EPP0_PIN_D3))	data |= 0x08;
-		if(val & _BV(EPP0_PIN_D4))	data |= 0x10;
-		if(val & _BV(EPP0_PIN_D5))	data |= 0x20;
-		if(val & _BV(EPP0_PIN_D6))	data |= 0x40;
-		if(val & _BV(EPP0_PIN_D7))	data |= 0x80;
-	} else {
-		if(val & _BV(EPP1_PIN_D0))	data |= 0x01;
-		if(val & _BV(EPP1_PIN_D1))	data |= 0x02;
-		if(val & _BV(EPP1_PIN_D2))	data |= 0x04;
-		if(val & _BV(EPP1_PIN_D3))	data |= 0x08;
-		if(val & _BV(EPP1_PIN_D4))	data |= 0x10;
-		if(val & _BV(EPP1_PIN_D5))	data |= 0x20;
-		if(val & _BV(EPP1_PIN_D6))	data |= 0x40;
-		if(val & _BV(EPP1_PIN_D7))	data |= 0x80;
-	}
+	if(val & port->msk_data[0])	data |= 0x01;
+	if(val & port->msk_data[1])	data |= 0x02;
+	if(val & port->msk_data[2])	data |= 0x04;
+	if(val & port->msk_data[3])	data |= 0x08;
+	if(val & port->msk_data[4])	data |= 0x10;
+	if(val & port->msk_data[5])	data |= 0x20;
+	if(val & port->msk_data[6])	data |= 0x40;
+	if(val & port->msk_data[7])	data |= 0x80;
 	return data;
 }
 
-static uint32_t epp0_data_to_port_bytetable[256];	// Bit translation tables
-static uint32_t epp1_data_to_port_bytetable[256];
-
-RPEPP_ALWAYS_INLINE static inline uint32_t epp_data_to_port(unsigned port, uint8_t val)
+RPEPP_ALWAYS_INLINE static inline uint32_t epp_data_to_port(const hm2_rpepp_t *port, uint8_t val)
 {
-	return port ? epp1_data_to_port_bytetable[val] : epp0_data_to_port_bytetable[val];
+	return port->bytetable[val];
 }
 
-static void rpepp_init_datatables(void)
+static void rpepp_init_datatable(hm2_rpepp_t *port)
 {
 	unsigned i;
 	// Crude but effective
 	for(i = 0; i < 256; i++) {
-		uint32_t port0 = 0;
-		uint32_t port1 = 0;
-		if(i & 0x01) { port0 |= _BV(EPP0_PIN_D0); port1 |= _BV(EPP1_PIN_D0); }
-		if(i & 0x02) { port0 |= _BV(EPP0_PIN_D1); port1 |= _BV(EPP1_PIN_D1); }
-		if(i & 0x04) { port0 |= _BV(EPP0_PIN_D2); port1 |= _BV(EPP1_PIN_D2); }
-		if(i & 0x08) { port0 |= _BV(EPP0_PIN_D3); port1 |= _BV(EPP1_PIN_D3); }
-		if(i & 0x10) { port0 |= _BV(EPP0_PIN_D4); port1 |= _BV(EPP1_PIN_D4); }
-		if(i & 0x20) { port0 |= _BV(EPP0_PIN_D5); port1 |= _BV(EPP1_PIN_D5); }
-		if(i & 0x40) { port0 |= _BV(EPP0_PIN_D6); port1 |= _BV(EPP1_PIN_D6); }
-		if(i & 0x80) { port0 |= _BV(EPP0_PIN_D7); port1 |= _BV(EPP1_PIN_D7); }
-		epp0_data_to_port_bytetable[i] = port0;
-		epp1_data_to_port_bytetable[i] = port1;
+		uint32_t pdat = 0;
+		if(i & 0x01) { pdat |= port->msk_data[0]; }
+		if(i & 0x02) { pdat |= port->msk_data[1]; }
+		if(i & 0x04) { pdat |= port->msk_data[2]; }
+		if(i & 0x08) { pdat |= port->msk_data[3]; }
+		if(i & 0x10) { pdat |= port->msk_data[4]; }
+		if(i & 0x20) { pdat |= port->msk_data[5]; }
+		if(i & 0x40) { pdat |= port->msk_data[6]; }
+		if(i & 0x80) { pdat |= port->msk_data[7]; }
+		port->bytetable[i] = pdat;
 	}
 }
 
@@ -314,13 +302,10 @@ RPEPP_ALWAYS_INLINE static inline void reg_wr(const volatile void *addr, uint32_
 /*
  * Note for low-level functions
  * ============================
- * Call these routines with a constant arguments. The compiler cannot eliminate
- * index calculations and the conditional statements if the argumemts are not
- * constant and will therefore have a significant performance impact.
- *
- * The performance has to be reevaluated if the code is adapted to configurable
- * pins from module parameters. A whole lot of memory accesses are required
- * when the pins are no longer a constant.
+ * Call these routines with a constant arguments if possible. The compiler
+ * cannot eliminate index calculations and the conditional statements if the
+ * argumemts are not constant and will therefore have a significant performance
+ * impact.
  *
  * The constant rule is already broken in the setup/restore functions, but
  * these are not timing critical and just result in more code. Not a real
@@ -393,72 +378,44 @@ RPEPP_ALWAYS_INLINE static inline void gpio_fsel(uint32_t pin, uint32_t func)
  * ensure that the slave side has its buffers in the right direction at the
  * same time.
  */
-RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_output(unsigned port)
+RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_output(const hm2_rpepp_t *port)
 {
-	if(!port) {
-		reg_wr(&gpio->gpclr0, _BV(EPP0_PIN_RW));		// Clear R/W
-		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) | EPP0_FSEL_0_OUT);
-		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) | EPP0_FSEL_1_OUT);
-		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) | EPP0_FSEL_2_OUT);
-	} else {
-		reg_wr(&gpio->gpclr0, _BV(EPP1_PIN_RW));		// Clear R/W
-		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) | EPP1_FSEL_0_OUT);
-		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) | EPP1_FSEL_1_OUT);
-		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) | EPP1_FSEL_2_OUT);
-	}
+	reg_wr(&gpio->gpclr0, port->msk_rw);		// Clear R/W
+	reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) | port->fsel_out[0]);
+	reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) | port->fsel_out[1]);
+	reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) | port->fsel_out[2]);
 }
 
-RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_input(unsigned port)
+RPEPP_ALWAYS_INLINE static inline void epp_dataportdir_input(const hm2_rpepp_t *port)
 {
-	if(!port) {
-		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) & ~EPP0_FSEL_0_MASK);
-		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) & ~EPP0_FSEL_1_MASK);
-		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) & ~EPP0_FSEL_2_MASK);
-		reg_wr(&gpio->gpset0, _BV(EPP0_PIN_RW));		// Set R/W
-	} else {
-		reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) & ~EPP1_FSEL_0_MASK);
-		reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) & ~EPP1_FSEL_1_MASK);
-		reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) & ~EPP1_FSEL_2_MASK);
-		reg_wr(&gpio->gpset0, _BV(EPP1_PIN_RW));		// Set R/W
-	}
+	reg_wr(&gpio->gpfsel0, reg_rd(&gpio->gpfsel0) & port->fsel_msk[0]);
+	reg_wr(&gpio->gpfsel1, reg_rd(&gpio->gpfsel1) & port->fsel_msk[1]);
+	reg_wr(&gpio->gpfsel2, reg_rd(&gpio->gpfsel2) & port->fsel_msk[2]);
+	reg_wr(&gpio->gpset0, port->msk_rw);		// Set R/W
 }
 
 /*
  * Perform EPP transactions
  */
-RPEPP_ALWAYS_INLINE static inline void epp_assert_strobe(unsigned port, bool ad_strobe, bool active)
+RPEPP_ALWAYS_INLINE static inline void epp_assert_strobe(const hm2_rpepp_t *port, bool ad_strobe, bool active)
 {
 	// Strobes are active low
-	if(!port) {
-		if(active) {
-			if(ad_strobe)
-				reg_wr(&gpio->gpclr0, _BV(EPP0_PIN_AS));	// Address strobe to low
-			else
-				reg_wr(&gpio->gpclr0, _BV(EPP0_PIN_DS));	// Data strobe to low
-		} else {
-			if(ad_strobe)
-				reg_wr(&gpio->gpset0, _BV(EPP0_PIN_AS));	// Address strobe to high
-			else
-				reg_wr(&gpio->gpset0, _BV(EPP0_PIN_DS));	// Data strobe to high
-		}
+	if(active) {
+		if(ad_strobe)
+			reg_wr(&gpio->gpclr0, port->msk_as);	// Address strobe to low
+		else
+			reg_wr(&gpio->gpclr0, port->msk_ds);	// Data strobe to low
 	} else {
-		if(active) {
-			if(ad_strobe)
-				reg_wr(&gpio->gpclr0, _BV(EPP1_PIN_AS));	// Address strobe to low
-			else
-				reg_wr(&gpio->gpclr0, _BV(EPP1_PIN_DS));	// Data strobe to low
-		} else {
-			if(ad_strobe)
-				reg_wr(&gpio->gpset0, _BV(EPP1_PIN_AS));	// Address strobe to high
-			else
-				reg_wr(&gpio->gpset0, _BV(EPP1_PIN_DS));	// Data strobe to high
-		}
+		if(ad_strobe)
+			reg_wr(&gpio->gpset0, port->msk_as);	// Address strobe to high
+		else
+			reg_wr(&gpio->gpset0, port->msk_ds);	// Data strobe to high
 	}
 }
 
 #define TIMEOUT_SPINS	1000	// Many clock cycles (>80 us; spec says ~10 us)
 
-RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(unsigned port, uint8_t data, bool ad_strobe)
+RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(const hm2_rpepp_t *port, uint8_t data, bool ad_strobe)
 {
 	// It is assumed that the data port is set to output at this time and
 	// the R/W pin is set low
@@ -467,44 +424,44 @@ RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(unsigned port, uint8_t da
 
 	portdata = epp_data_to_port(port, data);
 
-	reg_wr(&gpio->gpclr0, portdata ^ (port ? EPP1_DMASK : EPP0_DMASK));	// Clear data bits to clear
-	reg_wr(&gpio->gpset0, portdata);					// Set data bits to set
+	reg_wr(&gpio->gpclr0, portdata ^ port->msk_alldata);	// Clear data bits to clear
+	reg_wr(&gpio->gpset0, portdata);			// Set data bits to set
 
 	// Wait for the WAIT line to be(come) low
 	timeout = TIMEOUT_SPINS;
-	while((reg_rd(&gpio->gplev0) & _BV(port ? EPP1_PIN_WAIT : EPP0_PIN_WAIT)) && --timeout)
+	while((reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
 	if(!timeout) {
 		// The WAIT line is active --> no board attached?
 		return false;
 	}
-
 	epp_assert_strobe(port, ad_strobe, true);
 
 	// Wait for the WAIT line to go high
 	timeout = TIMEOUT_SPINS;
-	while(!(reg_rd(&gpio->gplev0) & _BV(port ? EPP1_PIN_WAIT : EPP0_PIN_WAIT)) && --timeout)
+	while(!(reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
 	if(!timeout) {
 		// Timeout on WAIT line --> maybe no board attached?
 		epp_assert_strobe(port, ad_strobe, false);
 		return false;
 	}
+	//rtapi_print_msg(RPEPP_DBG, "write: spins %u\n", TIMEOUT_SPINS - timeout);
 
 	epp_assert_strobe(port, ad_strobe, false);	// Done transaction (we don't wait for the WAIT signal)
 	return true;
 }
 
-RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *data, bool ad_strobe)
+RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(const hm2_rpepp_t *port, uint8_t *data, bool ad_strobe)
 {
 	// It is assumed that the data port is set to input at this time and
-	// teh R/W pin set high
+	// the R/W pin set high
 	uint32_t portdata;
 	unsigned timeout;
 
 	// Wait for the WAIT line to be(come) low
 	timeout = TIMEOUT_SPINS;
-	while((reg_rd(&gpio->gplev0) & _BV(port ? EPP1_PIN_WAIT : EPP0_PIN_WAIT)) && --timeout)
+	while((reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
 	if(!timeout) {
 		// The WAIT line is active --> no board attached?
@@ -515,13 +472,14 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *da
 
 	// Wait for the WAIT line to go high
 	timeout = TIMEOUT_SPINS;
-	while(!(reg_rd(&gpio->gplev0) & _BV(port ? EPP1_PIN_WAIT : EPP0_PIN_WAIT)) && --timeout)
+	while(!(reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
 	if(!timeout) {
 		// Timeout on WAIT line --> maybe no board attached?
 		epp_assert_strobe(port, ad_strobe, false);
 		return false;
 	}
+	//rtapi_print_msg(RPEPP_DBG, "read: spins %u\n", TIMEOUT_SPINS - timeout);
 
 	// The spec says that the data is output from the slave on the rising
 	// edge of WAIT and is subsequently read on the rising edge of DSTROBE.
@@ -534,7 +492,7 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *da
 	// data-lines settle.
 	// An alternative way is to read the data twice. The reg_rd() function
 	// stalls the core and is therefore rather slow. The wait for WAIT loop
-	// is about 80ns per spin (@1.2GHz). One dummy synchronous read should
+	// is about 65ns per spin (@1.2GHz). One dummy synchronous read should
 	// give us some 20+ns settling time.
 
 	reg_rd(&gpio->gplev0);	// Dummy read to allow for data settling
@@ -547,38 +505,38 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(unsigned port, uint8_t *da
 	return true;
 }
 
-RPEPP_ALWAYS_INLINE static inline bool epp_addr_write16(unsigned port, uint16_t val)
+RPEPP_ALWAYS_INLINE static inline bool epp_addr_write16(const hm2_rpepp_t *port, uint16_t val)
 {
 	// Write two bytes to address port in lo-hi-byte order
 	// The data port must have been set to output
 	if(!epp_write_cycle(port, val & 0xff, true)) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.addr_write16: Write timeout on address write byte 0\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.addr_write16: Write timeout on address write byte 0\n", port->eppid);
 		return false;
 	}
 	if(!epp_write_cycle(port, (val >> 8) & 0xff, true)) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.addr_write16: Write timeout on address write byte 1\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.addr_write16: Write timeout on address write byte 1\n", port->eppid);
 		return false;
 	}
 	return true;
 }
 
-RPEPP_ALWAYS_INLINE static inline bool epp_addr_write8(unsigned port, uint8_t val)
+RPEPP_ALWAYS_INLINE static inline bool epp_addr_write8(const hm2_rpepp_t *port, uint8_t val)
 {
 	// Write a single byte to address port
 	// The data port must have been set to output
 	if(!epp_write_cycle(port, val & 0xff, true)) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.addr_write8: Write timeout\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.addr_write8: Write timeout\n", port->eppid);
 		return false;
 	}
 	return true;
 }
 
-RPEPP_ALWAYS_INLINE static inline bool epp_data_write8(unsigned port, uint8_t val)
+RPEPP_ALWAYS_INLINE static inline bool epp_data_write8(const hm2_rpepp_t *port, uint8_t val)
 {
 	// Write a single byte to data port
 	// The data port must have been set to output
 	if(!epp_write_cycle(port, val, false)) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.data_write8: Write timeout\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.data_write8: Write timeout\n", port->eppid);
 		return false;
 	}
 	return true;
@@ -586,28 +544,29 @@ RPEPP_ALWAYS_INLINE static inline bool epp_data_write8(unsigned port, uint8_t va
 
 /*********************************************************************/
 /*
- * HM2 interface: Write buffer to EPP0
+ * HM2 interface: Write buffer to an EPP port
  */
-static int rpepp_epp0_write(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
+static int rpepp_epp_write(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
 {
+	const hm2_rpepp_t *port = (const hm2_rpepp_t *)llio;
 	int wsize;
 	uint32_t *wbuf = (uint32_t *)buffer;
 
 	if(size <= 0)
 		return 0;
 	if(size & 3) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP0.write: Unaligned write, size=%d is not multiple of 4\n", size);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.write: Unaligned write, size=%d is not multiple of 4\n", port->eppid, size);
 		return 0;
 	}
 
-	epp_dataportdir_output(EPP_PORT_0);
+	epp_dataportdir_output(port);
 
 	// Write the address
-	if(!epp_addr_write16(EPP_PORT_0, addr | HM2_ADDR_AUTOINCR)) {
+	if(!epp_addr_write16(port, addr | HM2_ADDR_AUTOINCR)) {
 		if(llio->io_error)
 			*llio->io_error = 1;
 		llio->needs_reset = 1;
-		epp_dataportdir_input(EPP_PORT_0);
+		epp_dataportdir_input(port);
 		return 0;
 	}
 
@@ -617,56 +576,59 @@ static int rpepp_epp0_write(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer
 		uint8_t *pbuf = (uint8_t *)&word;
 		unsigned bsize;
 		for(bsize = 4; bsize; bsize--) {
-			if(!epp_write_cycle(EPP_PORT_0, *pbuf++, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP0.write: Write error on data byte nr. %d of %d\n", size - (wsize-1)*4-bsize+1, size);
+			if(!epp_write_cycle(port, *pbuf++, false)) {
+				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.write: Write error on data byte nr. %d of %d\n",
+						port->eppid, size - (wsize-1)*4-bsize+1, size);
 				if(llio->io_error)
 					*llio->io_error = 1;
 				llio->needs_reset = 1;
-				epp_dataportdir_input(EPP_PORT_0);
+				epp_dataportdir_input(port);
 				return 0;
 			}
 		}
 	}
 
-	epp_dataportdir_input(EPP_PORT_0);
+	epp_dataportdir_input(port);
 	return 1;
 }
 
 /*
- * HM2 interface: Read buffer from EPP0
+ * HM2 interface: Read buffer from an EPP port
  */
-static int rpepp_epp0_read(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
+static int rpepp_epp_read(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
 {
+	const hm2_rpepp_t *port = (const hm2_rpepp_t *)llio;
 	int wsize;
 	uint32_t *wbuf = (uint32_t *)buffer;
 
 	if(size <= 0)
 		return 0;
 	if(size & 3) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP0.read: Unaligned read, size=%d is not multiple of 4\n", size);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.read: Unaligned read, size=%d is not multiple of 4\n", port->eppid, size);
 		return 0;
 	}
 
-	epp_dataportdir_output(EPP_PORT_0);
+	epp_dataportdir_output(port);
 
 	// Write the address
-	if(!epp_addr_write16(EPP_PORT_0, addr | HM2_ADDR_AUTOINCR)) {
+	if(!epp_addr_write16(port, addr | HM2_ADDR_AUTOINCR)) {
 		if(llio->io_error)
 			*llio->io_error = 1;
 		llio->needs_reset = 1;
-		epp_dataportdir_input(EPP_PORT_0);
+		epp_dataportdir_input(port);
 		return 0;
 	}
 
 	// Read the data into the buffer
-	epp_dataportdir_input(EPP_PORT_0);
+	epp_dataportdir_input(port);
 	for(wsize = size / 4; wsize; wsize--) {
 		uint32_t word;
 		uint8_t *pbuf = (uint8_t *)&word;
 		unsigned bsize;
 		for(bsize = 4; bsize; pbuf++, bsize--) {
-			if(!epp_read_cycle(EPP_PORT_0, pbuf, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP0.read: Read error on data byte nr. %d of %d\n", size - (wsize-1)*4-bsize+1, size);
+			if(!epp_read_cycle(port, pbuf, false)) {
+				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.read: Read error on data byte nr. %d of %d\n",
+						port->eppid, size - (wsize-1)*4-bsize+1, size);
 				if(llio->io_error)
 					*llio->io_error = 1;
 				llio->needs_reset = 1;
@@ -679,101 +641,7 @@ static int rpepp_epp0_read(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer,
 	return 1;
 }
 
-/*
- * HM2 interface: Write buffer to EPP1
- */
-static int rpepp_epp1_write(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
-{
-	int wsize;
-	uint32_t *wbuf = (uint32_t *)buffer;
-
-	if(size <= 0)
-		return 0;
-	if(size & 3) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP1.write: Unaligned write, size=%d is not multiple of 4\n", size);
-		return 0;
-	}
-
-	epp_dataportdir_output(EPP_PORT_1);
-
-	// Write the address
-	if(!epp_addr_write16(EPP_PORT_1, addr | HM2_ADDR_AUTOINCR)) {
-		if(llio->io_error)
-			*llio->io_error = 1;
-		llio->needs_reset = 1;
-		epp_dataportdir_input(EPP_PORT_1);
-		return 0;
-	}
-
-	// Write the data from the buffer
-	for(wsize = size / 4; wsize; wsize--) {
-		uint32_t word = htobe32(*wbuf++);
-		uint8_t *pbuf = (uint8_t *)&word;
-		unsigned bsize;
-		for(bsize = 4; bsize; bsize--) {
-			if(!epp_write_cycle(EPP_PORT_1, *pbuf++, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP1.write: Write error on data byte nr. %d of %d\n", size - (wsize-1)*4-bsize+1, size);
-				if(llio->io_error)
-					*llio->io_error = 1;
-				llio->needs_reset = 1;
-				epp_dataportdir_input(EPP_PORT_1);
-				return 0;
-			}
-		}
-	}
-
-	epp_dataportdir_input(EPP_PORT_1);
-	return 1;
-}
-
-/*
- * HM2 interface: Read buffer from EPP0
- */
-static int rpepp_epp1_read(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
-{
-	int wsize;
-	uint32_t *wbuf = (uint32_t *)buffer;
-
-	if(size <= 0)
-		return 0;
-	if(size & 3) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP1.write: Unaligned read, size=%d is not multiple of 4\n", size);
-		return 0;
-	}
-
-	epp_dataportdir_output(EPP_PORT_1);
-
-	// Write the address
-	if(!epp_addr_write16(EPP_PORT_1, addr | HM2_ADDR_AUTOINCR)) {
-		if(llio->io_error)
-			*llio->io_error = 1;
-		llio->needs_reset = 1;
-		epp_dataportdir_input(EPP_PORT_1);
-		return 0;
-	}
-
-	// Read the data into the buffer
-	epp_dataportdir_input(EPP_PORT_1);
-	for(wsize = size / 4; wsize; wsize--) {
-		uint32_t word;
-		uint8_t *pbuf = (uint8_t *)&word;
-		unsigned bsize;
-		for(bsize = 4; bsize; pbuf++, bsize--) {
-			if(!epp_read_cycle(EPP_PORT_1, pbuf, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP1.read: Read error on data byte nr. %d of %d\n", size - (wsize-1)*4-bsize+1, size);
-				if(llio->io_error)
-					*llio->io_error = 1;
-				llio->needs_reset = 1;
-				return 0;
-			}
-		}
-		*wbuf++ = be32toh(word);
-	}
-
-	return 1;
-}
-
-RPEPP_ALWAYS_INLINE static inline int epp_target_reset(unsigned port)
+RPEPP_ALWAYS_INLINE static inline int epp_target_reset(const hm2_rpepp_t *port)
 {
 	unsigned i;
 	uint8_t byte;
@@ -821,12 +689,12 @@ RPEPP_ALWAYS_INLINE static inline int epp_target_reset(unsigned port)
 	// make sure the FPGA is not asserting its /DONE bit
 	epp_dataportdir_input(port);
 	if(!epp_read_cycle(port, &byte, false)) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.reset: Read data timeout\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.reset: Read data timeout\n", port->eppid);
 		return -EIO;
 	}
 
 	if(byte & 0x01) {
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%u.reset: /DONE is not low after CPLD reset.\n", port);
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.reset: /DONE is not low after CPLD reset.\n", port->eppid);
 		return -EBUSY;
 	}
 	return 0;
@@ -835,12 +703,12 @@ RPEPP_ALWAYS_INLINE static inline int epp_target_reset(unsigned port)
 /*
  * HM2 interface: Perform a board reset on EPP0
  */
-static int rpepp_epp0_reset(hm2_lowlevel_io_t *llio)
+static int rpepp_epp_reset(hm2_lowlevel_io_t *llio)
 {
 	int rv;
 
 	llio->needs_reset = 0;	// If the reset fails, we cannot do much more
-	if((rv = epp_target_reset(EPP_PORT_0)))
+	if((rv = epp_target_reset((const hm2_rpepp_t *)llio)))
 		return rv;
 
 	// Getting here means we should be fine
@@ -850,25 +718,7 @@ static int rpepp_epp0_reset(hm2_lowlevel_io_t *llio)
 	return 0;
 }
 
-/*
- * HM2 interface: Perform a board reset on EPP1
- */
-static int rpepp_epp1_reset(hm2_lowlevel_io_t *llio)
-{
-	int rv;
-
-	llio->needs_reset = 0;	// If the reset fails, we cannot do much more
-	if((rv = epp_target_reset(EPP_PORT_1)))
-		return rv;
-
-	// Getting here means we should be fine
-	if(llio->io_error)
-		*llio->io_error = 0;
-
-	return 0;
-}
-
-RPEPP_ALWAYS_INLINE static inline int epp_program_fpga(unsigned port, uint8_t *data, int size)
+RPEPP_ALWAYS_INLINE static inline int epp_program_fpga(const hm2_rpepp_t *port, uint8_t *data, int size)
 {
 	epp_dataportdir_output(port);
 	if(!epp_addr_write8(port, 0)) {		// Select the CPLD's data address
@@ -887,50 +737,29 @@ RPEPP_ALWAYS_INLINE static inline int epp_program_fpga(unsigned port, uint8_t *d
 	return 0;
 }
 
-static inline void epp_report_program_speed(unsigned port, uint64_t ts, uint64_t te, int size)
+static inline void epp_report_program_speed(const hm2_rpepp_t *port, uint64_t ts, uint64_t te, int size)
 {
 	uint32_t delta = (te - ts) / 1000;	// in microseconds
-	rtapi_print_msg(RPEPP_INFO, "EPP%u.program_fpga: %d bytes sent in %u ms (%u kB/s)\n",
-		port, size, delta / 1000, size * 1000 / (delta * 1024));
+	rtapi_print_msg(RPEPP_INFO, "EPP%d.program_fpga: %d bytes sent in %u ms (%u kB/s)\n",
+		port->eppid, size, delta / 1000, size * 1000 / (delta * 1024));
 }
 
 /*
- * HM2 interface: Perform a firmware programming cycle on EPP0
+ * HM2 interface: Perform a firmware programming cycle
  */
-static int rpepp_epp0_program_fpga(hm2_lowlevel_io_t *llio, const bitfile_t *bf)
+static int rpepp_epp_program_fpga(hm2_lowlevel_io_t *llio, const bitfile_t *bf)
 {
+	const hm2_rpepp_t *port = (const hm2_rpepp_t *)llio;
 	int rv;
 	int64_t ts, te;
 
-	(void)llio;
-
 	ts = rtapi_get_time();
-	rv = epp_program_fpga(EPP_PORT_0, (uint8_t *)bf->e.data, bf->e.size);
+	rv = epp_program_fpga(port, (uint8_t *)bf->e.data, bf->e.size);
 	te = rtapi_get_time();
 	if(!rv)
-		epp_report_program_speed(EPP_PORT_0, ts, te, bf->e.size);
+		epp_report_program_speed(port, ts, te, bf->e.size);
 	else
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP0: firmware programming failed\n");
-	return rv;
-}
-
-/*
- * HM2 interface: Perform a firmware programming cycle on EPP0
- */
-static int rpepp_epp1_program_fpga(hm2_lowlevel_io_t *llio, const bitfile_t *bf)
-{
-	int rv;
-	int64_t ts, te;
-
-	(void)llio;
-
-	ts = rtapi_get_time();
-	rv = epp_program_fpga(EPP_PORT_1, (uint8_t *)bf->e.data, bf->e.size);
-	te = rtapi_get_time();
-	if(!rv)
-		epp_report_program_speed(EPP_PORT_1, ts, te, bf->e.size);
-	else
-		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP1: firmware programming failed\n");
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d: firmware programming failed\n", port->eppid);
 	return rv;
 }
 
@@ -1018,111 +847,293 @@ static void inline gpio_pull(unsigned pin, uint32_t pud)
 }
 
 /*
- * Pin setup definitions
- * Tables are a quick and clean way to define all pins and settings.
+ * GPIO pin setup and restore
+ * Provide mapping of the pins such that configured overlaps are detected and
+ * complained about.
  */
-typedef struct __epp_pinsetup_t {
-	uint8_t	pin;		// The GPIO pin number
-	uint8_t	io;		// Input/output FSEL selector
-	uint8_t pullup;		// Pull-up/pull-down/off
-	uint8_t state;		// Output level after init
-} pinsetup_t;
+#define EPP_GPIO_PIN_MIN	2	// Only GPIOs 2...27 are available for use
+#define EPP_GPIO_PIN_MAX	27
 
-static const pinsetup_t epp0_pinsetup[] = {
-	{EPP0_PIN_D0,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D1,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D2,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D3,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D4,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D5,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D6,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_D7,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP0_PIN_DS,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP0_PIN_AS,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP0_PIN_RW,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP0_PIN_WAIT, GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLDOWN, 0}
+enum {
+	EPP_GPIO_PIN_RESERVED = -1,
+	EPP_GPIO_PIN_UNUSED = 0,
+	EPP_GPIO_PIN_D0,
+	EPP_GPIO_PIN_D1,
+	EPP_GPIO_PIN_D2,
+	EPP_GPIO_PIN_D3,
+	EPP_GPIO_PIN_D4,
+	EPP_GPIO_PIN_D5,
+	EPP_GPIO_PIN_D6,
+	EPP_GPIO_PIN_D7,
+	EPP_GPIO_PIN_AS,
+	EPP_GPIO_PIN_DS,
+	EPP_GPIO_PIN_RW,
+	EPP_GPIO_PIN_WAIT,
 };
 
-static const pinsetup_t epp1_pinsetup[] = {
-	{EPP1_PIN_D0,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D1,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D2,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D3,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D4,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D5,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D6,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_D7,   GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLUP,   1},
-	{EPP1_PIN_DS,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP1_PIN_AS,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP1_PIN_RW,   GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF,      1},
-	{EPP1_PIN_WAIT, GPIO_FSEL_X_GPIO_INPUT,  GPIO_GPPUD_PULLDOWN, 0}
-};
-
-static void pins_setup(const pinsetup_t *pinsetup, unsigned n)
+static void pin_setup(int pin, uint32_t io, uint32_t pullup, unsigned state)
 {
-	unsigned i;
+	gpio_fsel(pin, io);
+	gpio_pull(pin, pullup);
+	if(state)
+		gpio_set(pin);
+	else
+		gpio_clr(pin);
+}
 
-	for(i = 0; i < n; i++) {
-		gpio_fsel(pinsetup[i].pin, pinsetup[i].io);
-		gpio_pull(pinsetup[i].pin, pinsetup[i].pullup);
-		if(pinsetup[i].state)
-			gpio_set(pinsetup[i].pin);
-		else
-			gpio_clr(pinsetup[i].pin);
+static void pin_restore(int pin)
+{
+	if(pin >= EPP_GPIO_PIN_MIN && pin <= EPP_GPIO_PIN_MAX) {
+		gpio_fsel(pin, GPIO_FSEL_X_GPIO_INPUT);
+		gpio_pull(pin, GPIO_GPPUD_PULLUP);
 	}
 }
 
-static void pins_restore(const pinsetup_t *pinsetup, unsigned n)
+static const char *pinfunc_str(int pin)
 {
-	unsigned i;
-
-	for(i = 0; i < n; i++) {
-		gpio_fsel(pinsetup[i].pin, GPIO_FSEL_X_GPIO_INPUT);
-		gpio_pull(pinsetup[i].pin, GPIO_GPPUD_PULLUP);
+	switch(pin) {
+	case EPP_GPIO_PIN_D0: return "EPP_GPIO_PIN_D0";
+	case EPP_GPIO_PIN_D1: return "EPP_GPIO_PIN_D1";
+	case EPP_GPIO_PIN_D2: return "EPP_GPIO_PIN_D2";
+	case EPP_GPIO_PIN_D3: return "EPP_GPIO_PIN_D3";
+	case EPP_GPIO_PIN_D4: return "EPP_GPIO_PIN_D4";
+	case EPP_GPIO_PIN_D5: return "EPP_GPIO_PIN_D5";
+	case EPP_GPIO_PIN_D6: return "EPP_GPIO_PIN_D6";
+	case EPP_GPIO_PIN_D7: return "EPP_GPIO_PIN_D7";
+	case EPP_GPIO_PIN_AS: return "EPP_GPIO_PIN_AS";
+	case EPP_GPIO_PIN_DS: return "EPP_GPIO_PIN_DS";
+	case EPP_GPIO_PIN_RW: return "EPP_GPIO_PIN_RW";
+	case EPP_GPIO_PIN_WAIT: return "EPP_GPIO_PIN_WAIT";
 	}
+	return "<unknown function assigned to GPIO pin>";
 }
 
 /*
- * Only EPP 1.9 requires the WAIT line to be low to start a cycle. Older
- * versions (EPP 1.7, pre IEEE 1284) state that the cycle may start while WAIT
- * is high. However, doing so would not permit us to have a complete handshake
- * for each and every transfer.
- * The distinction is not problem here since we only interface with known
- * hardware. It would seem that adding all variants is superfluous. We simply
- * force the handshake to comply to EPP 1.9 and complain if we meet resistance.
+ * Record of the pin mapping between GPIO and EPP function to ensure
+ * non-overlapping pin assignment.
+ *
+ * We are lucky that the RPi has all available GPIO pins combined on one word.
  */
-#define TIMEOUT_SPIN_WAITPIN	125000		// Many cycles >10 ms
-static void peripheral_setup(void)
-{
-	uint32_t to;
-	if(epp_probe & RPEPP_PROBE_0) {	// Port EPP0 pin setup
-		pins_setup(epp0_pinsetup, NELEM(epp0_pinsetup));
-		for(to = TIMEOUT_SPIN_WAITPIN; to; to--) {
-			if(!(reg_rd(&gpio->gplev0) & _BV(EPP0_PIN_WAIT)))
-				break;
-		}
-		if(!to)
-			rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP0 'wait' line active timeout. Line stuck at high level.\n");
-	}
+static struct {
+	int	port;
+	int	func;
+} pin_map[EPP_GPIO_PIN_MAX+1] = {
+	{ -1, EPP_GPIO_PIN_RESERVED },	// GPIO  0 ID_SD, hat-spec eeprom
+	{ -1, EPP_GPIO_PIN_RESERVED },	// GPIO  1 ID_SC, hat-spec eeprom
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  2 SDA
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  3 SCL
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  4 GPCLK0
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  5
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  6
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  7 SPI0/CE1 (D7)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  8 SPI0/CE0 (D7)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO  9 SPI0/MISO (D6)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 10 SPI0/MOSI (D5)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 11 SPI0/SCLK (D4)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 12
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 13
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 14 UART TXD (/dev/ttyAMA0)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 15 UART RXD (/dev/ttyAMA0)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 16 SPI1/CE2 (D7)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 17 SPI1/CE1 (D7)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 18 SPI1/CE0 (D7)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 19 SPI1/MISO (D6)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 20 SPI1/MOSI (D5)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 21 SPI1/SCLK (D4)
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 22
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 23
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 24
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 25
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 26
+	{ -1, EPP_GPIO_PIN_UNUSED },	// GPIO 27
+/*
+ *	{ -1, EPP_GPIO_PIN_RESERVED },	// GPIO 28, unavailable
+ *	{ -1, EPP_GPIO_PIN_RESERVED },	// GPIO 29, unavailable
+ *	{ -1, EPP_GPIO_PIN_RESERVED },	// GPIO 30, unavailable
+ *	{ -1, EPP_GPIO_PIN_RESERVED }	// GPIO 31, unavailable
+ */
+};
 
-	if(epp_probe & RPEPP_PROBE_1) {	// Port EPP1 pin setup
-		pins_setup(epp1_pinsetup, NELEM(epp1_pinsetup));
-		for(to = TIMEOUT_SPIN_WAITPIN; to; to--) {
-			if(!(reg_rd(&gpio->gplev0) & _BV(EPP1_PIN_WAIT)))
-				break;
-		}
-		if(!to)
-			rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP1 'wait' line active timeout. Line stuck at high level.\n");
+static bool check_pin(int pin, int func, int port, const char *name)
+{
+	if(pin < 0 || pin >= NELEM(pin_map)) {
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d: Mapping '%s' to GPIO %d: pin out of range\n", port, name, pin);
+		return false;
 	}
+	if(pin_map[pin].func == EPP_GPIO_PIN_RESERVED) {
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d: Mapping '%s' to GPIO %d: pin is inaccessible or reserved for other function\n",
+				port, name, pin);
+		return false;
+	}
+	if(pin_map[pin].func != EPP_GPIO_PIN_UNUSED) {
+		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d: Mapping '%s' to GPIO %d: pin already assigned to function EPP%d:%s\n",
+				port, name, pin, pin_map[pin].port, pinfunc_str(pin_map[pin].func));
+		return false;
+	}
+	pin_map[pin].func = func;
+	pin_map[pin].port = port;
+	return true;
 }
 
-static void peripheral_restore(void)
+/*
+ * Return non-zero if a pin is on one of the SPI pins
+ */
+#define ONSPI_SPI0_CE	0x01
+#define ONSPI_SPI0_SIG	0x02
+#define ONSPI_SPI1_CE	0x04
+#define ONSPI_SPI1_SIG	0x08
+static unsigned is_spi_pin(int pin)
 {
-	if(epp_probe & RPEPP_PROBE_0)	// Port EPP0 pin setup
-		pins_restore(epp0_pinsetup, NELEM(epp0_pinsetup));
+	switch(pin) {
+	case 7:		// SPI0/CE1
+	case 8:		// SPI0/CE0
+		return ONSPI_SPI0_CE;
+	case 9:		// SPI0/MISO
+	case 10:	// SPI0/MOSI
+	case 11:	// SPI0/SCLK
+		return ONSPI_SPI0_SIG;
+	case 16:	// SPI1/CE2
+	case 17:	// SPI1/CE1
+	case 18:	// SPI1/CE0
+		return ONSPI_SPI1_CE;
+	case 19:	// SPI1/MISO
+	case 20:	// SPI1/MOSI
+	case 21:	// SPI1/SCLK
+		return ONSPI_SPI1_SIG;
+	}
+	return 0;
+}
 
-	if(epp_probe & RPEPP_PROBE_1)	// Port EPP1 pin setup
-		pins_restore(epp1_pinsetup, NELEM(epp1_pinsetup));
+#define TIMEOUT_SPIN_WAITPIN	125000		// Many cycles >10 ms
+static int peripheral_setup(hm2_rpepp_t *board)
+{
+	uint32_t to;
+	int pin;
+	int i;
+	int offset = board->nr;	// Index offset for module parameter pin layout arrays
+	unsigned onspi = 0;
+	char name[3];
+
+	board->fsel_msk[0] = 0xffffffff;	// And-mask
+	board->fsel_msk[1] = 0xffffffff;
+	board->fsel_msk[2] = 0xffffffff;
+	board->fsel_out[0] = 0x00000000;	// Or-mask
+	board->fsel_out[1] = 0x00000000;
+	board->fsel_out[2] = 0x00000000;
+	name[0] = 'D';
+	name[2] = '\0';
+	for(i = 0; i < 8; i++) {
+		pin = pin_data[i + 8*offset];
+		name[1] = '0' + i;
+		if(!check_pin(pin, EPP_GPIO_PIN_D0 + i, board->eppid, name))
+			return -EINVAL;
+		pin_setup(pin, GPIO_FSEL_X_GPIO_INPUT, GPIO_GPPUD_PULLUP, 1);
+		board->pin_data[i] = pin;	// Port pin
+		board->msk_data[i] = _BV(pin);	// Port mask
+		board->msk_alldata |= _BV(pin);	// Combined mask
+		board->fsel_msk[pin / 10] &= ~(RPEPP_GM << (3*(pin % 10)));
+		board->fsel_out[pin / 10] |=   RPEPP_GO << (3*(pin % 10));
+		onspi |= is_spi_pin(pin);
+		rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> D%d\n", board->eppid, pin, i);
+	}
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: fsel_msk[0] = 0x%08x, fsel_out[0] = 0x%08x\n",
+			board->eppid, board->fsel_msk[0], board->fsel_out[0]);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: fsel_msk[1] = 0x%08x, fsel_out[1] = 0x%08x\n",
+			board->eppid, board->fsel_msk[1], board->fsel_out[1]);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: fsel_msk[2] = 0x%08x, fsel_out[2] = 0x%08x\n",
+			board->eppid, board->fsel_msk[2], board->fsel_out[2]);
+
+	rpepp_init_datatable(board);
+
+	pin = pin_rw[1*offset];
+	if(!check_pin(pin, EPP_GPIO_PIN_RW, board->eppid, "R/W"))
+		return -EINVAL;
+	pin_setup(pin, GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF, 1);
+	board->pin_rw = pin;
+	board->msk_rw = _BV(pin);
+	onspi |= is_spi_pin(pin);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> R/W\n", board->eppid, pin);
+
+	pin = pin_ds[1*offset];
+	if(!check_pin(pin, EPP_GPIO_PIN_DS, board->eppid, "DSTROBE"))
+		return -EINVAL;
+	pin_setup(pin, GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF, 1);
+	board->pin_ds = pin;
+	board->msk_ds = _BV(pin);
+	onspi |= is_spi_pin(pin);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> DSTROBE\n", board->eppid, pin);
+
+	pin = pin_as[1*offset];
+	if(!check_pin(pin, EPP_GPIO_PIN_AS, board->eppid, "ASTROBE"))
+		return -EINVAL;
+	pin_setup(pin, GPIO_FSEL_X_GPIO_OUTPUT, GPIO_GPPUD_OFF, 1);
+	board->pin_as = pin;
+	board->msk_as = _BV(pin);
+	onspi |= is_spi_pin(pin);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> ASTROBE\n", board->eppid, pin);
+
+	pin = pin_wait[1*offset];
+	if(!check_pin(pin, EPP_GPIO_PIN_WAIT, board->eppid, "WAIT"))
+		return -EINVAL;
+	pin_setup(pin, GPIO_FSEL_X_GPIO_INPUT, GPIO_GPPUD_PULLDOWN, 0);
+	board->pin_wait = pin;
+	board->msk_wait = _BV(pin);
+	onspi |= is_spi_pin(pin);
+	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> WAIT\n", board->eppid, pin);
+
+	/*
+	 * We need to check the pin assignments against SPI mappings and warn
+	 * if the pins are not compatible. Otherwise, combining EPP and SPI may
+	 * cause failure in some unexpected way.
+	 */
+	if(epp_spi_check && onspi) {
+		if((onspi & ONSPI_SPI0_SIG) && (onspi & ONSPI_SPI1_SIG))
+			rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d occupies both signals from SPI0 and SPI1\n", board->eppid);
+		if(onspi & ONSPI_SPI0_SIG) {
+			if(board->pin_data[4] != 11 || board->pin_data[5] != 10 || board->pin_data[6] != 9)
+				rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d: SPI0 signals not on D[456] or not in right order.\n", board->eppid);
+			else if(board->pin_data[7] != 8 && board->pin_data[7] != 7)
+				rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d: SPI0 has no CE signal on D7.\n", board->eppid);
+		}
+		if(onspi & ONSPI_SPI1_SIG) {
+			if(board->pin_data[4] != 21 || board->pin_data[5] != 20 || board->pin_data[6] != 19)
+				rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d: SPI1 signals not on D[456] or not in right order.\n", board->eppid);
+			else if(board->pin_data[7] != 18 && board->pin_data[7] != 17 && board->pin_data[7] != 16)
+				rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d: SPI1 has no CE signal on D7.\n", board->eppid);
+		}
+	}
+
+	/*
+	 * Only EPP 1.9 requires the WAIT line to be low to start a cycle.
+	 * Older versions (EPP 1.7, pre IEEE 1284) state that the cycle may
+	 * start while WAIT is high. However, doing so would not permit us to
+	 * have a complete handshake for each and every transfer.
+	 * The distinction is not a problem here since we only interface with
+	 * known hardware. It would seem that adding all variants is
+	 * superfluous. We simply force the handshake to comply to EPP 1.9 and
+	 * complain if we meet resistance.
+	 */
+	for(to = TIMEOUT_SPIN_WAITPIN; to; to--) {
+		if(!(reg_rd(&gpio->gplev0) & board->msk_wait))
+			break;
+	}
+	if(!to)
+		rtapi_print_msg(RPEPP_WARN, "hm2_rpepp: EPP%d: 'WAIT' line active timeout. Line stuck at high level.\n", board->eppid);
+
+	return 0;
+}
+
+static void peripheral_restore(const hm2_rpepp_t *board)
+{
+	unsigned i;
+
+	for(i = 0; i < 8; i++)
+		pin_restore(board->pin_data[i]);
+
+	pin_restore(board->pin_rw);
+	pin_restore(board->pin_ds);
+	pin_restore(board->pin_as);
+	pin_restore(board->pin_wait);
 }
 
 /*
@@ -1236,7 +1247,7 @@ static int probe_board(hm2_rpepp_t *board, const char *fixident)
 		// The check_cookie() call should return the address of the
 		// idrom for this particular board and firmware.
 		if((ret = check_cookie(board)) < 0) {
-			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: Maybe this boards needs FPGA firmware before running (use boardid=xxx).\n");
+			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: Maybe this boards needs FPGA firmware before running (use boardids=xxx).\n");
 			return ret;
 		}
 
@@ -1265,24 +1276,14 @@ static int probe_board(hm2_rpepp_t *board, const char *fixident)
 			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.probe_board: Reset board failed (errno=%d)\n", board->eppid, ret);
 			return ret;
 		}
-		if(board->eppid) {
-			epp_dataportdir_output(EPP_PORT_1);	// Set port in output mode
-			epp_addr_write8(EPP_PORT_1, 0);		// Select CPLD data register
 
-			epp_dataportdir_input(EPP_PORT_1);	// Set port in input mode
-			if(!epp_read_cycle(EPP_PORT_1, &byte, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.probe_board: Read data timeout\n", board->eppid);
-				return -EIO;
-			}
-		} else {
-			epp_dataportdir_output(EPP_PORT_0);	// Set port in output mode
-			epp_addr_write8(EPP_PORT_0, 0);		// Select CPLD data register
+		epp_dataportdir_output(board);		// Set port in output mode
+		epp_addr_write8(board, 0);		// Select CPLD data register
 
-			epp_dataportdir_input(EPP_PORT_0);	// Set port in input mode
-			if(!epp_read_cycle(EPP_PORT_0, &byte, false)) {
-				rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.probe_board: Read data timeout\n", board->eppid);
-				return -EIO;
-			}
+		epp_dataportdir_input(board);		// Set port in input mode
+		if(!epp_read_cycle(board, &byte, false)) {
+			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: EPP%d.probe_board: Read data timeout\n", board->eppid);
+			return -EIO;
 		}
 		if(byte & 0x01)
 			idrom.fpga_size = 400;
@@ -1340,8 +1341,7 @@ static int rpepp_setup(void)
 	if(epp_debug >= RTAPI_MSG_NONE && epp_debug <= RTAPI_MSG_ALL)
 		rtapi_set_msg_level(epp_debug);
 
-	rpepp_init_datatables();	// Bit translation tables
-
+	// Must run on a Raspberry Pi
 	if((platform = check_platform()) == RPI_UNSUPPORTED) {
 		rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: Unsupported Platform, only Raspberry1/2/3 supported.\n");
 		return -1;
@@ -1358,41 +1358,38 @@ static int rpepp_setup(void)
 		return retval;
 	}
 
-	peripheral_setup();
-
+	// Init the board descriptors with sane data
 	memset(boards, 0, sizeof(boards));
+	for(i = 0; i < RPEPP_MAX_BOARDS; i++) {
+		boards[i].pin_rw = -1;		// Init pins to -1 so we can unwind in case of error
+		boards[i].pin_ds = -1;
+		boards[i].pin_as = -1;
+		boards[i].pin_wait = -1;
+		for(j = 0; j < 8; j++)
+			boards[i].pin_data[j] = -1;
 
+		boards[i].llio.private = &boards[i].llio;	// Self reference
+		boards[i].llio.comp_id = comp_id;		// Upstream reference
+
+		boards[i].llio.read = rpepp_epp_read;
+		boards[i].llio.write = rpepp_epp_write;
+		boards[i].llio.reset = rpepp_epp_reset;
+		boards[i].llio.program_fpga = rpepp_epp_program_fpga;
+	}
+
+	// Perform the probes
 	for(j = i = 0; i < RPEPP_MAX_BOARDS; i++) {
 		if(!(epp_probe & (1 << i)))		// Probe only if requested
 			continue;
 
-		boards[j].llio.private = &boards[j].llio;	// Self reference
-		boards[j].llio.comp_id = comp_id;		// Upstream reference
-		boards[j].eppid = i;				// Port reference
-		boards[j].nr = j;				// Detect order reference
+		boards[j].eppid = i;			// Port reference
+		boards[j].nr = j;			// Detect order reference
 
-		switch(i) {
-		case EPP_PORT_0:
-			boards[j].llio.read = rpepp_epp0_read;
-			boards[j].llio.write = rpepp_epp0_write;
-			boards[j].llio.reset = rpepp_epp0_reset;
-			boards[j].llio.program_fpga = rpepp_epp0_program_fpga;
-			break;
-		case EPP_PORT_1:
-			boards[j].llio.read = rpepp_epp1_read;
-			boards[j].llio.write = rpepp_epp1_write;
-			boards[j].llio.reset = rpepp_epp1_reset;
-			boards[j].llio.program_fpga = rpepp_epp1_program_fpga;
-			break;
-		default:
-			// This should never happen...
-			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: Internal error. Trying to probe non-existent EPP port\n");
-			return -EFAULT;
-		}
-
-		if((retval = probe_board(&boards[j], boardid[j])) < 0) {
+		if((retval = peripheral_setup(&boards[j])) < 0)
 			return retval;
-		}
+
+		if((retval = probe_board(&boards[j], boardids[j])) < 0)
+			return retval;
 
 		if((retval = hm2_register(&boards[j].llio, config[j])) < 0) {
 			rtapi_print_msg(RPEPP_ERR, "hm2_rpepp: hm2_register() failed for EPP%d.\n", boards[j].eppid);
@@ -1412,7 +1409,9 @@ static int rpepp_setup(void)
 static void rpepp_cleanup(void)
 {
 	if((void *)peripheralmem != MAP_FAILED) {
-		peripheral_restore();
+		unsigned i;
+		for(i = 0; i < RPEPP_MAX_BOARDS; i++)
+			peripheral_restore(&boards[i]);
 		munmap(peripheralmem, peripheralsize);
 	}
 }

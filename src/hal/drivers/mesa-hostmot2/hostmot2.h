@@ -62,6 +62,7 @@
 
 
 
+#define HM2_ADDR_AUTOINCR  0x8000  // FPGA Autoincrement address in transfers
 
 // 
 // idrom addresses & constants

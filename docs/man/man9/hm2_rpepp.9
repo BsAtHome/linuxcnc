@@ -19,7 +19,7 @@
 .\" License along with this manual; if not, write to the Free
 .\" Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111,
 .\" USA.
-.TH HM2_RPEPP "9" "2017-06-17" "LinuxCNC Documentation" "HAL Component"
+.TH HM2_RPEPP "9" "2017-06-29" "LinuxCNC Documentation" "HAL Component"
 .de TQ
 .br
 .ns
@@ -49,21 +49,56 @@ be probed:
  \-  1 = EPP0,
  \-  2 = EPP1,
 
-The probe is performed exactly in above order. Any boards found will be
-numbered 0...1 in the order found. See also
+The probe is performed exactly in above order. See also
 .BR INTERFACE\ CONFGURATION
 below.
 It is an error if a probe fails and the driver will abort.
 
 .TP
-\fBboardid\fR [default: ""]
+\fBboardids\fR [default: ""]
 A list of strings to force a specific board to be detected at a specific EPP
-port. The boardid list is in detection order. Valid strings (case sensitive):
+port. The boardids list is in detection order. Valid strings (case sensitive):
  \- MESA7I43
  \- MESA7I90
 
-The boardid is only required if no firmware is programmed into the FPGA and the
-HostMot2 driver is required to download the firmware at initialization.
+The boardids is only required if no firmware is programmed into the FPGA and the
+HostMot2 driver is required to download the firmware at initialization. For
+example, if the first card is auto-probed and the second not, you can use
+\fBboardids\fR=",MESA7I43".
+
+.TP
+\fBpin_data\fR [default: 22,23,27,7,11,10,9,8,13,6,5,3,21,20,19,18]
+.TP
+\fBpin_ds\fR [default: 24,26]
+.TP
+\fBpin_as\fR [default: 17,12]
+.TP
+\fBpin_rw\fR [default: 25,16]
+.TP
+\fBpin_wait\fR [default: 4,2]
+Map the GPIO pin connections to the EPP data ports. The pins are assigned in
+detection order. The first set of values are assigned to the first port probed.
+The second set of values are assigned to the second probed port. A set of
+values consists of eight numbers for \fBpin_data\fR. All other pin\-mapping
+parameters have one number for a port. The default assignments are compatible
+with combined EPP/SPI operation. See also
+.BR INTERFACE\ CONFGURATION
+below.
+
+Note: It is not necessary to specify all GPIO pins if you only use one port. In
+that case, you only need to specify the pin mappings for that one specific port.
+
+.TP
+\fBepp_spi_check\fR [default: 1 (enabled)]
+Enable/disable checking GPIO pin mapping overlaps between EPP and SPI. SPI
+lines need to be assigned to very specific connections if the connection must
+support both EPP and SPI. The module will warn the user if such mapping is not
+possible. Secondly, the mappings must be separated enough if one EPP port and
+one SPI port is to be supported in the configuration. Please note that the
+.BR hm2_rpspi (9)
+module has no way of knowing about any pins that are in use for EPP.
+Set \fBepp_spi_check\fR=0 if you are sure about the configuration and want to
+prevent any warning messages from cluttering your terminal.
 
 .TP
 \fBepp_debug\fR [default: \-1]
@@ -91,12 +126,13 @@ on the board by the
 program.
 
 hm2_rpepp is only available when linuxcnc is configured with "uspace" realtime.
-It works with Raspian and PREEMPT_RT kernel (latest stable 4.4.4-rt9-v7+).
+It works with Raspian and PREEMPT_RT kernel (as of writing, latest stable
+4.4.4\-rt9\-v7+).
 
 .SH INTERFACE CONFIGURATION
 
-The EPP0/EPP1 peripherals are mapped to the following GPIO pins (with 40-pin
-I/O header pin\-number in parentheses):
+The default EPP0/EPP1 peripherals are mapped to the following GPIO pins (with
+40-pin I/O header pin\-number in parentheses):
 
 \fBEPP0\fR:
  \- D0=22(15), D1=23(16), D2=27(13), D3=7(26)
