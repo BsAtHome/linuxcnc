@@ -46,6 +46,19 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90,Mesa-AnythingIO-7i43");
 
 //#define RPEPP_GPIO_GUARD	1	// Define to protect GPIO indices
 
+// Enable rising edge detection on the WAIT signal to end a read or write
+// cycle. The kernel will throw an exception the first time the edge is seen
+// because interrupts are enabled by default, see /proc/interrupts. On kernel
+// 4.4.4-rt9-v7+ it is normally mapped to #79, device "3f200000.gpio:bank0".
+// The kernel will simply ignore the interrupt and disable it. However, it is
+// not "nice". Alternative is to write a kernel driver and handle it there.
+//
+// Detection of the rising edge is marginally faster than spinning and reading
+// the GPIO level. This needs to be evaluated more closely. Maybe it is
+// preferable to have one kernel complaint and faster operation than slightly
+// slower performance. Throughput numbers will have to decide.
+#define RPEPP_WAIT_EDGEDETECT	1
+
 #define RPEPP_MAX_BOARDS	2
 
 #ifndef _BV
@@ -435,12 +448,21 @@ RPEPP_ALWAYS_INLINE static inline bool epp_write_cycle(const hm2_rpepp_t *port, 
 		// The WAIT line is active --> no board attached?
 		return false;
 	}
-	epp_assert_strobe(port, ad_strobe, true);
 
-	// Wait for the WAIT line to go high
+#ifdef RPEPP_WAIT_EDGEDETECT
+	reg_wr(&gpio->gpeds0, port->msk_wait);		// Wait is now low, clear rising edge event
+#endif
+	epp_assert_strobe(port, ad_strobe, true);	// Assert strobe
+
+	// Wait for the WAIT line to go high (detect rising edge)
 	timeout = TIMEOUT_SPINS;
+#ifdef RPEPP_WAIT_EDGEDETECT
+	while(!(reg_rd(&gpio->gpeds0) & port->msk_wait) && --timeout)
+		;
+#else
 	while(!(reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
+#endif
 	if(!timeout) {
 		// Timeout on WAIT line --> maybe no board attached?
 		epp_assert_strobe(port, ad_strobe, false);
@@ -468,12 +490,20 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(const hm2_rpepp_t *port, u
 		return false;
 	}
 
-	epp_assert_strobe(port, ad_strobe, true);
+#ifdef RPEPP_WAIT_EDGEDETECT
+	reg_wr(&gpio->gpeds0, port->msk_wait);		// Wait is now low, clear rising edge event
+#endif
+	epp_assert_strobe(port, ad_strobe, true);	// Assert strobe
 
-	// Wait for the WAIT line to go high
+	// Wait for the WAIT line to go high (detect rising edge)
 	timeout = TIMEOUT_SPINS;
+#ifdef RPEPP_WAIT_EDGEDETECT
+	while(!(reg_rd(&gpio->gpeds0) & port->msk_wait) && --timeout)
+		;
+#else
 	while(!(reg_rd(&gpio->gplev0) & port->msk_wait) && --timeout)
 		;
+#endif
 	if(!timeout) {
 		// Timeout on WAIT line --> maybe no board attached?
 		epp_assert_strobe(port, ad_strobe, false);
@@ -494,8 +524,11 @@ RPEPP_ALWAYS_INLINE static inline bool epp_read_cycle(const hm2_rpepp_t *port, u
 	// stalls the core and is therefore rather slow. The wait for WAIT loop
 	// is about 65ns per spin (@1.2GHz). One dummy synchronous read should
 	// give us some 20+ns settling time.
-
-	reg_rd(&gpio->gplev0);	// Dummy read to allow for data settling
+	//
+	// The Mesa EPP implementation guarantees that data is valid /before/
+	// the WAIT line is set high. Therefore, we do not need to wait any
+	// longer here as could be required on normal EPP transactions.
+	//reg_rd(&gpio->gplev0);	// Dummy read to allow for data settling
 
 	portdata = reg_rd(&gpio->gplev0);		// Get the data
 	epp_assert_strobe(port, ad_strobe, false);	// Done transaction (we don't wait for the WAIT signal)
@@ -1080,6 +1113,16 @@ static int peripheral_setup(hm2_rpepp_t *board)
 	board->msk_wait = _BV(pin);
 	onspi |= is_spi_pin(pin);
 	rtapi_print_msg(RPEPP_DBG, "hm2_rpepp: EPP%d: GPIO %d -> WAIT\n", board->eppid, pin);
+
+#ifdef RPEPP_WAIT_EDGEDETECT
+	// Setup riging edge-detect on the WAIT pin
+	reg_wr(&gpio->gpren0, reg_rd(&gpio->gpren0) | board->msk_wait);		// Enable rising edge event
+	reg_wr(&gpio->gpfen0, reg_rd(&gpio->gpfen0) & ~board->msk_wait);	// Disable falling edge event
+	reg_wr(&gpio->gphen0, reg_rd(&gpio->gphen0) & ~board->msk_wait);	// Disable high level event
+	reg_wr(&gpio->gplen0, reg_rd(&gpio->gplen0) & ~board->msk_wait);	// Disable low level event
+	reg_wr(&gpio->gparen0, reg_rd(&gpio->gparen0) & ~board->msk_wait);	// Disable async falling edge event
+	reg_wr(&gpio->gpafen0, reg_rd(&gpio->gpafen0) & ~board->msk_wait);	// Disable async high level event
+#endif
 
 	/*
 	 * We need to check the pin assignments against SPI mappings and warn
