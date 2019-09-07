@@ -48,15 +48,13 @@ MODULE_SUPPORTED_DEVICE("Mesa-AnythingIO-7i90,Mesa-AnythingIO-7i43");
 
 // Enable rising edge detection on the WAIT signal to end a read or write
 // cycle. The kernel will throw an exception the first time the edge is seen
-// because interrupts are enabled by default, see /proc/interrupts. On kernel
-// 4.4.4-rt9-v7+ it is normally mapped to #79, device "3f200000.gpio:bank0".
-// The kernel will simply ignore the interrupt and disable it. However, it is
-// not "nice". Alternative is to write a kernel driver and handle it there.
+// because interrupts are apparently enabled by default. The kernel will simply
+// ignore the interrupt and disable it. However, it is not "nice".
 //
-// Detection of the rising edge is marginally faster than spinning and reading
+// Detection of the rising edge is slightly faster than spinning and reading
 // the GPIO level. This needs to be evaluated more closely. Maybe it is
-// preferable to have one kernel complaint and faster operation than slightly
-// slower performance. Throughput numbers will have to decide.
+// preferable to have one kernel complaint and faster operation than slower
+// performance.
 #define RPEPP_WAIT_EDGEDETECT	1
 
 #define RPEPP_MAX_BOARDS	2
@@ -579,7 +577,7 @@ RPEPP_ALWAYS_INLINE static inline bool epp_data_write8(const hm2_rpepp_t *port, 
 /*
  * HM2 interface: Write buffer to an EPP port
  */
-static int rpepp_epp_write(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
+static int rpepp_epp_write(hm2_lowlevel_io_t *llio, uint32_t addr, const void *buffer, int size)
 {
 	const hm2_rpepp_t *port = (const hm2_rpepp_t *)llio;
 	int wsize;
