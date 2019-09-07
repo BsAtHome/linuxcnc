@@ -53,7 +53,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #-----------------------------------------------------------------------
 
 # ngcgui allows a user to write subroutine files that contain
@@ -3389,7 +3389,7 @@ proc ::ngcgui::newpage {creatinghdl} {
     }
   }
   if $::ngc($creatinghdl,chooser) {
-    set subfile "\"\""  ;# chooser starts with no specifed subfile
+    set subfile "\"\""  ;# chooser starts with no specified subfile
   }
 
   set prefile ""

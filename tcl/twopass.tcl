@@ -4,20 +4,31 @@
 # is present and it evaluates all inifile HAL:HALFILE items in two passes.
 # HALFILE items may be halcmd files (.hal) or .tcl files
 #
+# By default, all HAL:HALFILEs are processed.  A .hal file may be
+# excluded from twopass processing by including a magic comment line
+# that begins with the text: "#NOTWOPASS" anywhere in the .hal file
+# (whitespace and case are ignored in finding this magic comment)".
+# Files identified with this magic comment are sourced by halcmd using
+# the -k (keep going) and -v (verbose) options.
+#
 # pass0:
-#       All HAL:HALFILEs are read.
-#       loadrt, loadusr commands are combined and executed at the end
+#       All HAL:HALFILEs (.hal,.tcl) are read.
+#       loadrt commands are combined and executed at the end
 #       of pass0 loadrt commands may be invoked multiple times for the
 #       same mod_name.  The "count=", "num_chan=", and "names=" forms for
 #       loadrt are supported but are mutually exclusive for each module.
 #       addf commands are deferred to pass1
 #
+#       loadusr commands are executed in pass0 so that any loadrt that
+#       depends on them will be satisfied.  The loadusr -W option should
+#       be used.
+#
 #       Some components (viz. pid) support a debug=dbg specifier on the
 #       loadrt line.  dbg values are ORed together.
 #
 # pass1:
-#       All HAL:HALFILES are reread, commands (except the loadrt and
-#       loadusr completed commands) are executed and addf commands
+#       All HAL:HALFILEs are reread, commands (except the loadrt
+#       completed commands) are executed and addf commands
 #       are executed in order of occurrence.
 #
 # The inifile item HAL:TWOPASS can be any non-null string.  This string
@@ -51,7 +62,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #--------------------------------------------------------------------------
 
 namespace eval ::tp {
@@ -101,9 +112,11 @@ proc ::tp::loadusr_substitute {args} {
   set pass [passnumber]
   #puts "loadusr_substitute<$pass> <$args>"
   if {$pass == 0} {
-    #puts "loadusr_substitute<$pass> ignored"
-  } else {
+    # do loadusr in pass 0 only
+    puts "twopass:pass0: loadusr $args"
     eval orig_loadusr $args
+  } else {
+    #"twopass: Ignore pass1: loadusr $args"
   }
 } ;# loadusr_substitute
 
@@ -122,8 +135,7 @@ proc ::tp::loadrt_substitute {arg1 args} {
   } else {
     set theargs [concat $arg1 $args]
   }
-  set parms  [split $theargs]
-  set module [lindex $parms 0]
+  set module [lindex $theargs 0]
   set pass   [passnumber]
 
   # keep track of loadrt for each module in order to detect
@@ -162,8 +174,53 @@ proc ::tp::loadrt_substitute {arg1 args} {
     }
   }
 
-  set parms   [lreplace $parms 0 0]
-  foreach pair $parms {
+  set parms   [lreplace $theargs 0 0]
+
+  # A loadrt cmd may have a complex config= with multiple items:
+  # Example:
+  # loadrt hm2_eth board_ip=n.n.n.n config="num_stepgens=n num_pwmgens=n"
+  # The parms item received here has escaped quotes:
+  #  board_ip=10.10.10.10 config=\"num_stepgens=3 num_pwmgens=2 num_encoders=2\"
+  # We have to find the escaped leading and trailing quotes and the
+  # blanks separating num_* items to assemble the config= parm.
+  # After assembling string for config=, remove the backslashes and
+  # use concat.
+
+  while {[string len $parms] > 0} {
+    set first_blank [string first " " $parms]
+    set first_escaped_quote [string first \\\" $parms]
+    set second_escaped_quote -1
+    if {$first_escaped_quote >=0} {
+       set second_escaped_quote \
+       [expr $first_escaped_quote +2 + \
+             [string first \\\" \
+                [string range $parms [expr $first_escaped_quote+2] end]] \
+       ]
+    }
+    # puts "____$first_blank $first_escaped_quote $second_escaped_quote"
+
+    if {$first_blank < 0} {
+      set pair $parms
+      set parms ""
+      #puts A_newparms=<$parms>
+    } else {
+      if {  ($first_escaped_quote< 0)
+          ||($first_escaped_quote>=0)&&($first_blank<$first_escaped_quote)
+         } {
+        set pair  [string range $parms 0 [expr $first_blank -1]]
+        set parms [string range $parms [expr $first_blank +1] end]
+        #puts B_newparms=<$parms>
+      } else {
+        set pair [string range $parms 0 [expr $second_escaped_quote +1]]
+        set pair [string map {\\ ""} $pair] ;# remove \" items
+        set pair "\[concat $pair\]"         ;# use concat
+        set parms [string range $parms [expr $second_escaped_quote +3] end]
+        #puts C_newparms=<$parms>
+      }
+    }
+    # handle "\n" (ref lcd.c component)
+    set pair [string map {\n \\n} $pair]
+
     set l     [split $pair =]
     set item  [lindex $l 0]
     set value [lindex $l 1]
@@ -230,7 +287,7 @@ proc ::tp::loadrt_substitute {arg1 args} {
                }
              }
     }
-  } ;# foreach pair
+  } ;# while
 } ;# loadrt_substitute
 
 proc ::tp::addf_substitute {args} {
@@ -321,27 +378,78 @@ proc ::tp::prep_the_files {} {
       set f $foundfile
 
       # convert to a temporary tcl file if necessary
-      set suffix [filesuffix $f]
-      switch -exact $suffix {
-        tcl {
+      switch -exact [file extension $f] {
+       .tcl {
+             # handle .tcl files with trailing backslash
+             set has_backslash ""
+             catch {set has_backslash [exec grep {\\$} $f]} msg
+             if {"$has_backslash" != ""} {
+               set ::TP($f,tmp) /tmp/tmp_[file tail $f]
+               set f [handle_tcl_with_backslash $f $::TP($f,tmp)]
+             }
              if {[llength $f_argv]} {
                set f "$f $f_argv" ;# optional args
              }
              lappend ::TP(runfiles) $f
              verbose "tclfile: $f"
             }
-        hal {set ::TP($f,tmp) /tmp/[file tail $f].tmp
-             verbose "convert $f to $::TP($f,tmp)"
-             hal_to_tcl $f $::TP($f,tmp)
-             lappend ::TP(runfiles) $::TP($f,tmp)
-             set ::TP(origfile,$::TP($f,tmp)) $f
+       .hal {
+             set ::TP($f,tmp) /tmp/tmp_[file tail $f]
+             set converted_file [hal_to_tcl $f $::TP($f,tmp)]
+             if {"$converted_file" == ""} {
+                puts "twopass:Sourcing $f WITHOUT twopass processing"
+                eval exec halcmd -vkf $f &
+             } else {
+               verbose "converted $f to $converted_file"
+               lappend ::TP(runfiles) $converted_file
+               set ::TP(origfile,$converted_file) $f
+             }
         }
         default {return -code error \
-                "prep_the_files:unknown file type <$suffix>"}
+                "prep_the_files:unknown file type <$f>"}
       }
     }
   }
 } ;# prep_the_files
+
+proc ::tp::handle_tcl_with_backslash {ifile ofile} {
+  if [catch {set fdin  [open $ifile r]
+             set fdout [open $ofile w]
+            } msg
+     ] {
+    puts "twopass: Error: $msg"
+    exit 1
+  }
+  puts $fdout "# temporary tcl file generated by twopass.tcl"
+  set lno 0
+  while 1 {
+    if [eof $fdin] break
+    incr lno
+    set theline [gets $fdin]
+    set line [string trim $theline]
+    if {"$line" == ""} continue
+
+    # handle .tcl files extended with backslash:
+    if {[string range $line end end] == "\\"} {
+      set line [string replace $line end end] ;# rm trailing backslash
+      if [info exists extend] {
+        set extend "${extend}$line" ;# subsequent extends
+      } else {
+        set extend "$line" ;# first extend
+      }
+      continue ;# get next line
+    } else {
+      if [info exists extend] {
+        set line "${extend}$line"
+      }
+    }
+    catch {unset extend}
+    puts $fdout "$line"
+  }
+  close $fdin
+  close $fdout
+  return $ofile
+} ;# handle_tcl_with_backslash
 
 proc ::tp::hal_to_tcl {ifile ofile} {
   # When hal files are specified with HAL:HALFILE,
@@ -372,6 +480,31 @@ proc ::tp::hal_to_tcl {ifile ofile} {
     set theline [gets $fdin]
     set line [string trim $theline]
     if {"$line" == ""} continue
+
+    # handle .hal files extended with backslash:
+    if {[string range $line end end] == "\\"} {
+      set line [string replace $line end end] ;# rm trailing backslash
+      if [info exists extend] {
+        set extend "${extend}$line" ;# subsequent extends
+      } else {
+        set extend "$line" ;# first extend
+      }
+      continue ;# get next line
+    } else {
+      if [info exists extend] {
+        set line "${extend}$line"
+      }
+    }
+    catch {unset extend}
+
+    # find *.hal files excluded from twopass processing:
+    set  tmpline [string map -nocase {" " ""} $line]
+    set  tmpline [string tolower $tmpline]
+    if {[string first "#notwopass" $tmpline] == 0} {
+       set notwopass 1 ;# this file will be sourced immediately
+       break
+    }
+
     if {[string first # $line] == 0} continue
     foreach suspect $::TP(conflictwords) {
       if {   ([string first "$suspect "  $line] == 0)
@@ -437,21 +570,26 @@ proc ::tp::hal_to_tcl {ifile ofile} {
   }
   close $fdin
   close $fdout
-  return $ofile
+
+  if [info exists notwopass] {
+    return "" ;# indicates no twopass handling for this .hal file
+  } else {
+    return $ofile
+  }
 } ;# hal_to_tcl
 
 proc ::tp::source_the_files {} {
+  set errct 0
   foreach file_plus_args $::TP(runfiles) {
     catch {unset ::argv}
     set f [lindex $file_plus_args 0]
-    if {[filesuffix $f] == "tcl"} {
+    if {[file extension $f] == ".tcl"} {
       # note: ::argv supplies the file_plus_args to the sourced file
       #       ::argv0 is not set to maintain compatibility with
       #       the way the linuxcnc script uses haltcl to use tcl files
       set ::argv [lrange $file_plus_args 1 end]
     }
     verbose "sourcing: $f"
-    set errct 0
 
     if [catch {source $f} msg] {
        if [info exists ::TP(origfile,$f)] {
@@ -465,21 +603,16 @@ proc ::tp::source_the_files {} {
     }
   }
   if {$errct} {
-    exit 1
+      exit 1
   }
 } ;# source_the_files
-
-proc ::tp::filesuffix {f} {
-  set dot [string last . $f]
-  if {$dot < 0} {return -code error "filesuffix: no suffix <$f>"}
-  return [string range $f [expr 1 + $dot ] end]
-} ;# filesuffix
 
 proc ::tp::load_the_modules {} {
   if ![info exists ::TP(modules)] {
     # no modules unlikely, but can occur in testing
     set ::TP(modules) ""
   }
+  set errct 0
   foreach m $::TP(modules) {
     set cmd "orig_loadrt $m" ;# this is the real loadrt
     if [info exists ::TP($m,count)] {
@@ -502,7 +635,11 @@ proc ::tp::load_the_modules {} {
     verbose "[string range $cmd 5 end]" ;# omit leading orig_
     if [catch { eval $cmd} msg] {
        puts "\ntwopass: load_the_modules cmd=<$cmd>\n$msg\n"
+       incr errct
     }
+  }
+  if $errct {
+      exit 1
   }
   set ::TP(loaded,modules) $::TP(modules)
   set ::TP(modules) ""

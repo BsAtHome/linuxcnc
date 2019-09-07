@@ -1,3 +1,197 @@
+ver 3.0.8
+- added the possibility to add also images to macro button. The images will be 
+  resized to fit the buttons (72x48). The macro file need to contain a line like
+  (IMAGE, ./macros/images/goto_x_y_z.png)
+  the path must be absolute or relative to the config dir, "~" is allowed in path
+
+ver 3.0.7.3
+- Ralf reported an error toggling the Edit Offsets button. It was caused because
+  I missed to change the widget handling of the dynamically created widgets on
+  this special page.
+
+ver 3.0.7.2
+- did not update the gmoccapy.tool measurement hal pin, so tool measurement ended
+  with an error after a restart of the GUI
+  Thanks to Mark and Ralf for reporting
+
+ver 3.0.7.1
+- jogging of non trivial kinematics need an int for jogging
+
+ver 3.0.7
+- jogging on configs with missing axis like XZ (Y missing) did lead to an error
+  due to not taken care about the homing status. Not homed requires the joint 
+  number, while jogging in homed state requires the axis index.
+
+ver 3.0.6
+- Most widgets like homing and touch button are now generated on the fly,
+  leading to the need of less resources and a quicker start of the GUI
+- gmoccapy now supports 9 axis and 9 joints
+- configuration of joint axis relation are now applied as given in the
+  ini file, allowing also strange configs like XZCW lathe configs or
+  scara or 6 axis robot arms
+- Display of cutting speed is now correct, even on a lathe with
+  constant surface speed
+- Jog increments on a lathe do now take care of being in diameter or
+  radius mode, so if you jog 1,0 mm in diameter mode, the X axis will
+  only move 0.5 mm!
+- a lot of internal stuff has been optimized
+
+ver 3.0.5
+- solved bug with macro button if no virtual keyboard 
+
+ver 3.0.4
+- changed combi_DRO to emit two signals, if clicked on the left side in the range 
+  of the axis letter, the signal will open the set_axis_value dialog, clicking
+  on the right will toggle the DRO readout
+
+ver 3.0.3.2
+- tool measurement check, just once, not from several sides, store it as self.tool_measure_OK
+
+ver 3.0.3.1
+- double function place in table
+
+ver 3.0.3
+- fullsize preview button now stays synchronized
+
+ver 3.0.2
+- minor code style changes
+- get rid of the screen2 stuff, as screens can be displayed using hal commands
+
+ver 3.0.1
+- bug being in full-size preview in auto mode and loading a file leaded to
+  normal view as expected, but the full-size button stayed activated
+
+ver 3.0.0
+- added the possibility to use up to 9 axis and 15 joints
+- no limits to configuration of axis and joints
+- support for lathes with additional axis like XZCW
+- support up to 16 macros
+- if an angular axis is used it will display an additional jog vel slider
+
+ver 2.3.5.1
+- removed unused import statements vte and pango from gmoccapy.py file
+
+ver 2.3.5
+- jogging a not homed machine did change the button state of MDI and AUTO to be
+  sensitive, what is not correct.
+- it was not possible to jog a unhomed machine over the given limits, what is 
+  not a correct behavior.
+
+ver 2.3.4.2
+- introduced new keyboard shortcuts (not case sensitive)
+  R = run program
+  P = pause program
+  S = resume program
+  This keys will only work in auto mode, not being in edit mode and 
+  a program must be loaded. Pause and resume do only work if a 
+  program is running and / or paused.
+
+ver 2.3.4.1
+- Philippe mentioned that a change of the DRO Size on settings page will be
+  saved as expected, but after new start of the GUI, the value did note be
+  restored properly. I have corrected the behavior
+
+ver 2.3.4
+- Leon82 mentioned, that offset page did close after editing a column and leaving
+  the edited cell. This was caused due to a hidden mode change to MDI because
+  leaving the cell would apply the change using MDI commands from 
+  offset page_widget.py. Gmoccapy now checks the state of the "EDIT OFFSETS" 
+  toggle button and does not react to MDI Mode switch if that button is active.
+  at the same time, the mode buttons etc. are disabled!
+  
+  Same changes as with gmoccapy 1.5.11
+
+ver 2.3.3.4
+- a merge of 2.7 to master resulted in a call of a widget, that does not longer
+  exist in master (adj_max_velocity) causing an exception on halui pin changes.
+  Thanks to COlger81 and Chris Morley for reporting the bug
+
+ver 2.3.3.3
+- editing offsets, leaded to a error output in the console, due to missing
+  widget btn_zero_x
+
+ver 2.3.3.2
+- toggling the chk_toggle_readout, raised an exception on 5 axis config
+
+ver 2.3.3.1
+- small changes to the code, as there was a possibility the
+  label was shown, even if auto tool measurement was not used
+
+ver 2.3.3
+- added a label at the button of the preview window to show the actual 
+  block-height value
+- the value is stored in the preference file and will be reloaded on start up,
+  the corresponding hal pin is set to that value
+- the block-height label is only visible, if the "use auto tool measurement" 
+  check-box is active!
+
+  Thanks to Rubenv and crislacuf for reporting
+
+ver 2.3.2.4
+- most of .format code rework done
+
+ver 2.3.2.3
+- display message as dialog, when critical errors do avoid the start of gmoccapy
+  not only report in terminal
+
+ver 2.3.2.2
+- ongoing reformatting the code to new .format style
+
+ver 2.3.2.1
+- formating bug in Vc, when over 100, float can not be formated as int
+
+ver 2.3.2
+- added a new label to toolinfo box, showing the cutting speed Vc
+  it uses the tool diameter on mill and the x-relative value for lathe
+- first code updates to the new string formating (not % but .format),
+  as this will be needed to switch over to python 3
+
+ver 2.3.1.9
+- dialogs, changed entry_dialog check for integer before show_all
+  This was only a cosmetic change
+- Solved bug in lathe mode, changing the size of DRO, did not 
+  change the Y DRO (D). Thanks to Partic T for reporting
+
+ver 2.3.1.8
+- made dialogs a Class and enable gobject signals with the dialogs
+  Now a sound will be played if a dialog pops up.
+
+  This is a first step to modify all the handling within the GUI to
+  make most parts react to signal and slots.
+
+ver 2.3.1.7
+- minor bug in self periodic, forgot to change an AUDIO_AVIABLE setting
+- some work on tool handling, i.e. not possible to delete tool in spindle
+  any more and after applying changes the tool in spindle will be marked
+
+ver 2.3.1.6
+- solved the bug, that the decimal separator was changed after starting the gui
+  the was related to the import of gst, as this import does change the value of
+  locale.localeconv()["decimal_point"]
+  I do not know why, but the import of gst prior to locale settings solves the problem
+
+ver 2.3.1.5
+- some code clearance, as the tooleditor stuff was reparted on several places
+  Now it is together in _init_tooleditor.
+  This is the begining of finding the bug of decimal separator handling
+  Push reload will replace the German "," with the "." Why = ?????
+
+ver 2.3.1.4
+- if no sound is available make the sound selecting widgets on the settings page
+  not sensitive, Thanks to Rene for reporting this misbehavior
+
+ver 2.3.1.3
+- changed the import of the player module, as Stretch does not support gst in
+  the way Wheesy or Jessie did
+
+ver 2.3.1.2
+- rodw reported that gmoccapy reported a wrong error if JOINT was mentioned
+  in the error report. That was caused due to an old change from Joints to axis
+  in _show_errors.
+
+ver 2.3.1.1
+- added KeyPad Jogging as a wish from "suspension" from the forum
+
 ver 2.3.1
 - added a new hal pin for tool diameter
 
@@ -313,6 +507,28 @@ ver. 2.0.1
 
 ver. 2.0.0
 - initial push of beta gmoccapy with 5 axis
+
+ver. 1.5.11
+- Leon82 mentioned, that offset page did close after editing a column and leaving
+  the edited cell. This was caused due to a hidden mode change to MDI because
+  leaving the cell would apply the change using MDI commands from 
+  offset page_widget.py. Gmoccapy now checks the state of the "EDIT OFFSETS" 
+  toggle button and does not react to MDI Mode switch if that button is active.
+  at the same time, the mode buttons etc. are disabled!
+
+ver. 1.5.10
+- fixed a misbehavior of the turtle button
+  If machine and system units was not identical, the turtle button destroyed
+  the values set on the jog vel slider
+  thanks to sliptonic from linuxcnc forum
+- while moving the max vel slider and units of machine and system not being 
+  identical, results in a jumping slider, as the factor has not been taken in 
+  account on the halui pin checking
+
+ver. 1.5.9
+- fixed a bug on import gst, leading to an exception if gst is not installed
+- fixed a bug, not taking care of Y-DRO (D) in lathe mode if the user changed
+  the size of the DRO
 
 ver. 1.6.0
 - changed the initial sound files to fit freedesktop path

@@ -1,5 +1,5 @@
 [EMC]
-VERSION = 1.0
+VERSION = 1.1
 MACHINE = trivkins xyzx KINEMATICS_BOTH
   DEBUG = 0
 
@@ -23,21 +23,19 @@ PARAMETER_FILE = xyzx.var
 [EMCMOT]
       EMCMOT = motmod
 COMM_TIMEOUT =       1.0
-   COMM_WAIT =       0.010
 SERVO_PERIOD = 1000000
 [EMCIO]
      EMCIO = io
 CYCLE_TIME = 0.100
 [TRAJ]
-        NO_FORCE_HOMING = 1
-            COORDINATES = X Y Z X 
-           LINEAR_UNITS = inch
-          ANGULAR_UNITS = degree
-             CYCLE_TIME =   0.010
-DEFAULT_LINEAR_VELOCITY =  10.0
-   DEFAULT_LINEAR_ACCEL =  200.0
-    MAX_LINEAR_VELOCITY =   10
-       MAX_LINEAR_ACCEL =  200.0
+            NO_FORCE_HOMING = 1
+                COORDINATES = X Y Z X
+               LINEAR_UNITS = inch
+              ANGULAR_UNITS = degree
+    DEFAULT_LINEAR_VELOCITY =  10.0
+DEFAULT_LINEAR_ACCELERATION = 200.0
+        MAX_LINEAR_VELOCITY =  10.0
+    MAX_LINEAR_ACCELERATION = 200.0
 
 [AXIS_X]
        MAX_LIMIT =   1e10

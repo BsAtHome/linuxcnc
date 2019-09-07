@@ -17,7 +17,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #
 # This presents and collects the data from the GUI pages
 #
@@ -33,6 +33,9 @@ import os
 from gi.repository import Gtk
 #import gobject
 from gi.repository import GObject
+import sys
+reload(sys)
+sys.setdefaultencoding('utf8')
 
 class Pages:
     def __init__(self, app):
@@ -139,7 +142,7 @@ class Pages:
 # All Page Methods
 #####################################################
 #***************
-# Intialize
+# Initialize
 #***************
     def initialize(self):
         # one time initialized data
@@ -456,7 +459,7 @@ class Pages:
         # Get first row
         treeiter = self.w.lstStore1.get_iter_first()
         if treeiter == None:
-            return True
+            return False
         self.d.halui_list.append(self.w.lstStore1.get_value(treeiter, 1))
         while treeiter != None:
             treeiter = self.w.lstStore1.iter_next(treeiter)
@@ -870,7 +873,7 @@ class Pages:
 # FINISH PAGE
 #*************
     def finished_prepare(self):
-        pass
+        self.w.label_simulator_warning.set_visible(self.w.createsimconfig.get_active())
     def finished_finish(self):
         self.a.buid_config()
 

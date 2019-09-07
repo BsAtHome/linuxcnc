@@ -1,4 +1,4 @@
-.PHONY: docs docsclean checkref checkref_en checkref_es checkref_fr
+.PHONY: docs docsclean checkref checkref_en checkref_es checkref_fr checkref_vi
 .PHONY: pdfdocs htmldocs install-doc install-doc-pdf install-doc-html
 
 DOC_DIR=../docs
@@ -92,6 +92,12 @@ DOC_SRCS_EN := \
 	gui/gmoccapy.txt \
 	gui/gmoccapy-hu.txt \
 	gui/gscreen.txt \
+	gui/qtvcp.txt \
+	gui/qtvcp_widgets.txt \
+	gui/qtvcp_libraries.txt \
+	gui/qtvcp_custom_widgets.txt \
+	gui/qtvcp_code_snippets.txt \
+	gui/qtvcp_development.txt \
 	gui/panelui.txt \
 	gui/halui.txt \
 	gui/image-to-gcode.txt \
@@ -131,6 +137,9 @@ DOC_SRCS_EN := \
 	motion/pid-theory.txt \
 	motion/tweaking-steppers.txt \
 	motion/5-axis-kinematics.txt \
+	motion/external-offsets.txt \
+	plasma/plasmac-user-guide.txt \
+	plasma/plasma-cnc-primer.txt \
 	remap/remap.txt \
 	user/starting-linuxcnc.txt \
 	user/user-concepts.txt \
@@ -240,7 +249,8 @@ DOC_TARGETS_XML_FR := $(filter %_fr.xml, $(DOC_TARGETS_XML))
 DOC_TARGETS_XML_EN := $(filter-out $(DOC_TARGETS_XML_ES), $(filter-out $(DOC_TARGETS_XML_FR), $(DOC_TARGETS_XML)) )
 DOC_TARGETS_HTML_ES := $(filter %_es.html, $(DOC_TARGETS_HTML))
 DOC_TARGETS_HTML_FR := $(filter %_fr.html, $(DOC_TARGETS_HTML))
-DOC_TARGETS_HTML_EN := $(filter-out $(DOC_TARGETS_HTML_ES), $(filter-out $(DOC_TARGETS_HTML_FR), $(DOC_TARGETS_HTML)) )
+DOC_TARGETS_HTML_VI := $(filter %_vi.html, $(DOC_TARGETS_HTML))
+DOC_TARGETS_HTML_EN := $(filter-out $(DOC_TARGETS_HTML_ES), $(filter-out $(DOC_TARGETS_HTML_FR), $(filter-out $(DOC_TARGETS_HTML_VI), $(DOC_TARGETS_HTML))) )
 
 MAN_HTML_TARGETS = $(patsubst $(DOC_DIR)/man/%, $(DOC_DIR)/html/man/%.html, $(MAN_SRCS))
 
@@ -318,7 +328,7 @@ copy_asciidoc_files:
 	cp -f /etc/asciidoc/stylesheets/*.css $(DOC_DIR)/html
 	cp -f /etc/asciidoc/javascripts/*.js $(DOC_DIR)/html
 
-checkref: checkref_en checkref_fr checkref_es
+checkref: checkref_en checkref_fr checkref_es checkref_vi
 
 checkref_en: $(DOC_TARGETS_HTML_EN) $(DOC_DIR)/html/index.html $(DOC_DIR)/html/gcode.html .htmldoc-stamp
 	@$(DOC_SRCDIR)/checkref English $^
@@ -328,6 +338,9 @@ checkref_fr: $(DOC_TARGETS_HTML_FR) $(DOC_DIR)/html/gcode_fr.html .htmldoc-stamp
 
 checkref_es: $(DOC_TARGETS_HTML_ES) .htmldoc-stamp
 	@$(DOC_SRCDIR)/checkref Spanish $^
+
+checkref_vi: $(DOC_TARGETS_HTML_VI) $(DOC_DIR)/html/gcode_vi.html .htmldoc-stamp
+	@$(DOC_SRCDIR)/checkref Vietnamese $^
 
 MAN_SRCS_NOSO = $(patsubst $(DOC_DIR)/man/%,%, \
 			$(shell grep -L '^\.so ' $(sort $(MAN_SRCS))))
@@ -571,6 +584,7 @@ docclean:
 	-rm -f $(DOC_DIR)/html/ladder/images/*.*
 	-rm -f $(DOC_DIR)/html/lathe/images/*.*
 	-rm -f $(DOC_DIR)/html/motion/images/*.*
+	-rm -f $(DOC_DIR)/html/plasma/images/*.*
 	-rm -f $(DOC_DIR)/html/remap/images/*.*
 	-rm -f $(DOC_DIR)/html/man/man1/*.*
 	-rm -f $(DOC_DIR)/html/man/man3/*.*

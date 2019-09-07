@@ -76,21 +76,25 @@ class emc_control:
         def home_all(self, b):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
+                self.emccommand.teleop_enable(False)
                 self.emccommand.home(-1)
 
         def unhome_all(self, b):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
+                self.emccommand.teleop_enable(False)
                 self.emccommand.unhome(-1)
 
         def home_selected(self, axis):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
+                self.emccommand.teleop_enable(False)
                 self.emccommand.home(axis)
 
         def unhome_selected(self, axis):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
+                self.emccommand.teleop_enable(False)
                 self.emccommand.unhome(axis)
 
         def jogging(self, b):
@@ -105,7 +109,7 @@ class emc_control:
         def spindle_forward(self, b, rpm=100):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
-                self.emccommand.spindle(1,rpm);
+                self.emccommand.spindle(1,rpm,0);
 
         def spindle_off(self, b):
                 if self.masked: return
@@ -115,7 +119,7 @@ class emc_control:
         def spindle_reverse(self, b, rpm=100):
                 if self.masked: return
                 self.emccommand.mode(self.emc.MODE_MANUAL)
-                self.emccommand.spindle(-1,rpm);
+                self.emccommand.spindle(-1,rpm,0);
 
         def spindle_faster(self, b):
                 if self.masked: return
@@ -300,7 +304,7 @@ class emc_status:
             return self.emcstat.feedrate
 
         def get_spindlerate(self):
-            return self.emcstat.spindlerate
+            return self.emcstat.spindle[0]['override']
 
         def get_maxvelocity(self):
             return self.emcstat.maxvelocity
@@ -434,9 +438,9 @@ class emc_status:
             # estop status
             self.data.estopped = self.emcstat.task_state == self.emc.STATE_ESTOP
             # spindle
-            self.data.spindle_dir = self.emcstat.spindle_direction
-            self.data.spindle_speed = abs(self.emcstat.spindle_speed)
-            self.data.spindle_override = self.emcstat.spindlerate
+            self.data.spindle_dir = self.emcstat.spindle[0]['direction']
+            self.data.spindle_speed = abs(self.emcstat.spindle[0]['speed'])
+            self.data.spindle_override = self.emcstat.spindle[0]['override']
             # other
             self.data.tool_in_spindle = self.emcstat.tool_in_spindle
             self.data.flood = self.emcstat.flood

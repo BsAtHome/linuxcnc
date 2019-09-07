@@ -166,7 +166,7 @@ package manager with this command 'sudo dpkg -i linuxcnc_2.7.4.deb'
 sudo dpkg -i linuxcnc_2.7.4.deb
 ----
 
-== Updating Configuration Files
+== Updating Configuration Files (for 2.8.x)
 
 The new version of LinuxCNC differs from version 2.7 in some ways that
 may require changes to your machine configuration.
@@ -214,6 +214,29 @@ configurations include:
 
 The following subsections and the section for 'Hal Changes' list items that
 may require additional user edits to ini or hal files.
+
+=== Multiple Spindle Support
+
+LinuxCNC now supports up to 8 spindles (and can be recompiled for more)
+Existing G-code will run without modification and most configurations
+will default to single spindles. To specify more than one spindle
+set the [TRAJ]SPINDLES= entry in the INI file *and* include the num_spindles=
+parameter for the motion module (set with either [EMCMOT]EMCMOT = motmod num_spindles=
+or included in a halfile loadrt entry for motmod).
+
+The motion module num_spindles= parameter and the [TRAJ]SPINDLES= settings
+*must* match.
+
+The spindle control pin names have been changed to make spindles look
+more like axes and joints. motion.spindle-speed-out is now spindle.0.speed-out
+for example. The automatic update script will take care of these changes.
+To control extra spindles the G and M-codes which control spindle speed
+now accept an additional "$" argument, for example M3 $2 to start the
+third spindle. "$" was chosen to avoid clashes with any existing code
+letters. It should be possible to create custom G-codes to match any
+other multi-spindle controller. 
+See the G-code and M-code manuals for code changes, and man motion for
+the HAL pin changes. 
 
 === TRAJ velocities, accelerations names
  
@@ -487,7 +510,42 @@ They could be transformed into pairs of lines like this:
 MAX_VELOCITY = 7.5
 -----
 
-== Hal Changes (updates for joints_axes)
+=== [TRAJ] settings
+
+In 2.7.x versions, trajectory planning ([TRAJ]) settings included:
+
+----
+[TRAJ]
+DEFAULT_ACCELERATION
+MAX_ACCELERATION
+----
+
+Interim work prepared for distinct linear and angular items by
+renaming these items as:
+
+----
+[TRAJ]
+DEFAULT_LINEAR_ACCEL
+MAX_LINEAR_ACCEL
+----
+
+As these abbreviated names were inconsistent with other name
+conventions and the implementation of the update_ini script,
+the interim naming has been corrected to use:
+
+----
+[TRAJ]
+DEFAULT_LINEAR_ACCELERATION
+MAX_LINEAR_ACCELERATION
+----
+
+[NOTE]
+
+Support for specifying trajectory planning angular default and maximum
+accelerations has not been implemented.
+
+
+== Hal Changes (updates for joints_axes 2.8.x)
 
 === Wheel or MPG (manual pulse generator) jogging
 
@@ -570,7 +628,17 @@ Note: In prior versions of LinuxCNC (before joints_axes updates), the
       (pins were created for all 9 axes)
       See the man page ('$ man milltask') for more information
 
-== Hal Changes (Other)
+== Hal Changes (Other 2.8.x)
+
+=== halcompile
+
+The number of names= instances was formerly limited to 16.  Now,
+for realtime components (loadrt) the instances are assigned
+dynamically with no built-in limit.  The limit of 16 still
+applies to names= items for userspace (loadusr) components.
+
+For components using 'personality', the maximum number is now
+settable by a command line option -P|--personalities.
 
 === Parameter to Pin changes
 
@@ -582,7 +650,7 @@ so that they can be connected to signals:
    motion.servo.last-period_ns (kernel-dependent availability)
 ----
 
-== Interface changes for joints_axes
+== Interface changes for joints_axes 2.8.x
 
 === python linuxcnc module
 
@@ -597,7 +665,7 @@ jog(linuxcnc.JOG_CONTINUOUS, joint-flag, joint-flag, velocity)
 jog(linuxcnc.JOG_INCREMENT, joint-flag, axis-or-joint-number, velocity, distance)
 ----
 
-== GUIs (updates for joints_axes)
+== GUIs (updates for joints_axes 2.8.x)
 
 === Notes on joint/axis jogging, homing, and kinematics
 
@@ -869,6 +937,9 @@ ShuttleXpress, so the old driver name is no longer accurate.
 
 === linuxcncrsh
 
+"Home All" is now supported with the set home subcommand
+by using -1 for the joint number
+
 The jogging commands have been altered to accomodate both joint (free)
 and teleop (world) jogging.
 
@@ -893,19 +964,19 @@ This command now attemps to jog the zeroth joint (Joint0) provided
 the mode is free (not teleop).  To jog the X axis, the mode
 must be teleop and the corresponding command is: 'set jog x 1.234'
 
-== Obsolete Guis
+== Obsolete Guis (removed for 2.8.x)
 
 The guis 'mini', 'keystick', and 'xlinuxcnc' have been removed in
 conjunction with updates for joints_axes.  All related source code,
 examples, and documentation are available in the git repository.
 
-== Deprecated Guis
+== Deprecated Guis (marked at 2.8.x)
 
 The 'linuxcnclcd' gui is a candidate for removal.
 Should this component be removed, all related source code, examples,
 and documentation will be available in the git repository.
 
-== Simulator configurations (updates for joints axes)
+== Simulator configurations (updates for joints axes 2.8.x)
 
 === Pre-joints_axes
 
@@ -929,7 +1000,7 @@ purpose.
 
 === Post-joints_axes
 
-With the incorporation of joints_axes functionality, may sims provided
+With the incorporation of joints_axes functionality, many sims provided
 in the distribution now take advantage of a general purpose halfile that
 supports numerous configurations automatically.  A typical sim config
 HALFILE specification is:
@@ -1037,10 +1108,19 @@ The sim config 'Sample Configurations/sim/axis/minimal_xyz.ini'
 demonstrates a working xyz configuration that uses LIB:basic_sim.tcl
 with a minimal number of ini file settings.
 
-== Ongoing updates to development branch
+== Miscellaneous updates for 2.8.x
 
 Commits to unreleased branches may make changes that affect testers
 and early-adopters of the unreleased software.
+
+=== Motion pins
+
+New pins (see the motion man page for more info):
+
+---
+axis.L.jog-accel-fraction
+joint.N.jog-accel-fraction
+---
 
 === Hal pins
 
@@ -1051,9 +1131,16 @@ was: axis.L.vel-cmd
  is: axis.l.teleop-vel-cmd
 ----
 
+New pins:
+
+----
+motion.homing-inhibit (see motion manpage)
+----
+
 === Hal component updates
 
 . siggen: new pin 'reset' to set output signal values to predefined state
+. biquad: pins 'type,f0,Q,s1,s2' were formerly params
 
 === XHC-HB04 Pendant Support
 
@@ -1070,8 +1157,74 @@ respectively.
 
 Remove signal pendant:jogenable-off for removed pin 'pendant_util.jogenable-off'
 
-Support connection of 'halui.mode.is-teleop' to 'pendant_util.amux-enable' via
-the signal 'pendant:amux-enable'.  This change allows homing and joint mode
-jogging to occur at normal (not reduced) acceleration settings.
+Support new motion pins for reduced accelerations
+(axis.L.jog-accel-fraction, joint.N.jog-accel-fraction) for wheel jogging.
+The use of [APPLICATIONS]APP=xhc-hb04-accels is no longer supported.
+Reduced accels are applied for wheel jogging only (not for nml commands
+issued by guis).
+
+=== [JOINT_n]HOME_SEQUENCE Starting values
+
+Starting sequence values may be 0, 1 (or -1) only.  See the
+"Homing Configuration" documentation for more information.
+
+=== [JOINT_n]HOME_SEQUENCE Negative values
+
+Joints using a negative HOME_SEQUENCE are not allowed to jog in joint
+mode in order to prevent misalignment (racking) in common gantry
+configurations.  As always, machines with any kinematics type must be
+homed prior to enabling conventional world mode jogging.
+
+=== TWOPASS support for complex loadrt config= items
+
+Added twopass support for loadrt config modparams with multiple
+settings separated by blanks and enclosed with quotes.  Example:
+
+----
+loadrt hm2_eth board_ip=10.10.10.10 config="num_encoders=2 num_pwmgens=2 num_stepgens=3"
+----
+
+== Changes beyond 2.8.x (master branch development)
+
+The master branch is version-tagged with prerelease notation, typically
+2.9~pre*
+
+=== Configuration Updates
+
+==== Inifile Settings
+
+New: [JOINT_n]HOME_INDEX_NO_ENCODER_RESET -- support encoder with
+index that does not reset upon receipt of index pulse following
+assertion of index_enable.
+
+=== Code Updates
+
+==== Reverse Run
+
+Support added for reverse run in the trajectory planner, the task, and
+motion modules, the python interface, the axis gui, and the test suite.
+
+==== Homing
+
+A homing api is provided by src/emc/motion/homing.h to support users'
+custom homing code that replaces src/emc/motion/homing.c with
+a user-customized homing.c file.
+
+==== Other
+
+lib/hallib/sim_lib.tcL: simulate encoder index if [JOINT_n]HOME_USE_INDEX
+is specified.
+
+=== Hal
+
+==== Components
+
+sim_home_switch: added I/O pin for index-enable
+
+=== Configs
+
+==== Simulation Configs
+
+sim/configs/axis/axis_9axis: demonstrate simulated encoder index
 
 // vim: set syntax=asciidoc:

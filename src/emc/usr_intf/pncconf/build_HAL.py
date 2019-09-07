@@ -16,7 +16,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #
 #    This builds the HAL files from the collected data.
 #
@@ -80,7 +80,7 @@ class HAL:
         print >>file, "loadrt [KINS]KINEMATICS"
         print >>file, "loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS"
         # pre process mesa commands
-        mesa_load_cmnd,mesa_read_cmnd,mesa_write_cmnd = self.a.hostmot2_command_string()
+        mesa_load_cmnd,mesa_read_cmnd,mesa_write_cmnd = self.a.hostmot2_command_string(substitution = self.d.useinisubstitution)
         if self.d.number_pports:
             # pre process pport commands
             pport_load_cmnd,pport_read_cmnd,pport_write_cmnd = self.a.pport_command_string()
@@ -101,43 +101,46 @@ class HAL:
         spindle_on = spindle_cw = spindle_ccw = False
         mist = flood = brake = at_speed = bldc = False
 
-        if self.d.findsignal("s-encoder-a"):
+        if self.a.findsignal("s-encoder-a"):
             spindle_enc = True        
-        if self.d.findsignal("probe"):
+        if self.a.findsignal("probe"):
             probe = True
-        if self.d.findsignal("s-pwm-pulse"):
+        if self.a.findsignal("s-pwm-pulse"):
             pwm = True
-        if self.d.findsignal("charge-pump"):
+        if self.a.findsignal("charge-pump"):
             pump = True
-        if self.d.findsignal("estop-ext"):
+        if self.a.findsignal("estop-ext"):
             estop = True
-        if self.d.findsignal("spindle-on"):
+        if self.a.findsignal("spindle-on"):
             spindle_on = True
-        if self.d.findsignal("spindle-cw"):
+        if self.a.findsignal("spindle-cw"):
             spindle_cw = True
-        if self.d.findsignal("spindle-ccw"):
+        if self.a.findsignal("spindle-ccw"):
             spindle_ccw = True
-        if self.d.findsignal("coolant-mist"):
+        if self.a.findsignal("coolant-mist"):
             mist = True
-        if self.d.findsignal("coolant-flood"):
+        if self.a.findsignal("coolant-flood"):
             flood = True
-        if self.d.findsignal("spindle-brake"):
+        if self.a.findsignal("spindle-brake"):
             brake = True
-        if self.d.findsignal("spindle-at-speed"):
+        if self.a.findsignal("spindle-at-speed"):
             at_speed = True
         for i in self.d.available_axes:
             if self.d[i+"bldc_option"]:
                 bldc = True
                 break
-        chargepump = self.d.findsignal("charge-pump-out")
+        chargepump = self.a.findsignal("charge-pump-out")
         # load PID compnent:
         # if axis needs PID- (has pwm signal) then add its letter to pidlist
         temp = ""
         for i in self.d.available_axes:
             #print "looking at available axis : ",i
-            #if not self.d.findsignal(i+"-encoder-a") and not self.d.findsignal(i+"-resolver"):
+            #if not self.a.findsignal(i+"-encoder-a") and not self.a.findsignal(i+"-resolver"):
             #    continue
             temp = temp + "pid.%s,"%i
+            tandemjoint = self.a.tandem_check(i)
+            if tandemjoint:
+                temp = temp + "pid.%s2,"%i
         # if user requested PID components add them to the list as well, starting at 0 and working up
         for i in range(0,self.d.userneededpid):
                 temp=temp+"pid.%d,"% (i)
@@ -326,7 +329,7 @@ class HAL:
                 print >>file, "%s"%i
 
         if chargepump:
-            steppinname = self.d.make_pinname(chargepump)
+            steppinname = self.a.make_pinname(chargepump, substitution = self.d.useinisubstitution)
             print >>file
             print >>file, "# ---Chargepump StepGen: 0.25 velocity = 10Khz square wave output---"
             print >>file
@@ -349,21 +352,53 @@ class HAL:
         self.connect_input(file)
         print >>file
 
-        if self.d.axes == 2:
-            self.connect_joint(file, 0, 'x')
-            self.connect_joint(file, 1, 'z')
-            self.connect_joint(file, 9, 's') # 9 for [SPINDLE_9]
-        elif self.d.axes == 0:
-            self.connect_joint(file, 0, 'x')
-            self.connect_joint(file, 1, 'y')
-            self.connect_joint(file, 2, 'z')
-            self.connect_joint(file, 9, 's') # 9 for [SPINDLE_9]
-        elif self.d.axes == 1:
-            self.connect_joint(file, 0, 'x')
-            self.connect_joint(file, 1, 'y')
-            self.connect_joint(file, 2, 'z')
-            self.connect_joint(file, 3, 'a')
-            self.connect_joint(file, 9, 's') # 9 for [SPINDLE_9]
+        ##############################################################
+        # connect joints 
+        ##############################################################
+        # self.d.axes:
+        # 0 = xyz
+        # 1 = xz
+        # 2 = xyza
+
+        if not self.d.axes in(0,1,2):
+            print 'error in number of axis identity: ', self.d.axes
+            return
+        jnum = 0
+        # Always add X axis
+        self.connect_joint(file, jnum, 'x')
+        tandemjoint = self.a.tandem_check('x')
+        if tandemjoint:
+            jnum += 1
+            self.connect_joint(file, jnum, 'x2')
+
+        # Maybe add Y Axis ###################
+        if self.d.axes in(0,1):
+            jnum += 1
+            self.connect_joint(file, jnum, 'y')
+            tandemjoint = self.a.tandem_check('y')
+            if tandemjoint:
+                jnum += 1
+                self.connect_joint(file, jnum, 'y2')
+
+        # Always add Z Axis ##################
+        jnum += 1
+        self.connect_joint(file, jnum, 'z')
+        tandemjoint = self.a.tandem_check('z')
+        if tandemjoint:
+            jnum += 1
+            self.connect_joint(file, jnum, 'z2')
+
+        # Maybe add A axis ###################
+        if self.d.axes == 1:
+            jnum += 1
+            self.connect_joint(file, jnum, 'a')
+            tandemjoint = self.a.tandem_check('a')
+            if tandemjoint:
+                jnum += 1
+                self.connect_joint(file, jnum, 'a2')
+
+        # Always add Spindle ##################
+        self.connect_joint(file, 9, 's') # 9 for [SPINDLE_9]
 
         print >>file
         print >>file, "#******************************"
@@ -390,9 +425,9 @@ class HAL:
 
         print >>file, "net jog-selected-pos      halui.axis.selected.plus"
         print >>file, "net jog-selected-neg      halui.axis.selected.minus"
-        print >>file, "net spindle-manual-cw     halui.spindle.forward"
-        print >>file, "net spindle-manual-ccw    halui.spindle.reverse"
-        print >>file, "net spindle-manual-stop   halui.spindle.stop"
+        print >>file, "net spindle-manual-cw     halui.spindle.0.forward"
+        print >>file, "net spindle-manual-ccw    halui.spindle.0.reverse"
+        print >>file, "net spindle-manual-stop   halui.spindle.0.stop"
         print >>file, "net machine-is-on         halui.machine.is-on"
         print >>file, "net jog-speed             halui.axis.jog-speed"
         print >>file, "net MDI-mode              halui.mode.is-mdi"
@@ -444,7 +479,7 @@ class HAL:
             print >>file
 
         # check for shared MPG 
-        pinname = self.d.make_pinname(self.d.findsignal("select-mpg-a"))
+        pinname = self.a.make_pinname(self.a.findsignal("select-mpg-a"), substitution = self.d.useinisubstitution)
         if pinname:
             print "shared MPG", pinname
             ending = ""
@@ -472,7 +507,7 @@ class HAL:
         # check for dedicated axis MPG jogging option
         for axletter in axis_convert:
             if axletter in self.d.available_axes:
-                pinname = self.d.make_pinname(self.d.findsignal(axletter+"-mpg-a"))
+                pinname = self.a.make_pinname(self.a.findsignal(axletter+"-mpg-a"), substitution = self.d.useinisubstitution)
                 if pinname:
                     ending = ""
                     if "enc" in pinname: ending = ".count"
@@ -487,7 +522,7 @@ class HAL:
                         print >>file, _("#  ---mpg signals---")
                         print >>file
                         if self.d.multimpg: # means MPG per axis
-                            print >>file, "setp    axis.%d.jog-vel-mode 0" % axnum
+                            print >>file, "setp    axis.%s.jog-vel-mode 0" % axletter
                             print >>file, "net %s-jog-enable         =>  axis.%s.jog-enable"% (axletter, axletter)
                             print >>file, "net %s-jog-count          =>  axis.%s.jog-counts" % (axletter, axletter)
                             print >>file, "net selected-jog-incr    =>  axis.%s.jog-scale" % axletter
@@ -515,7 +550,7 @@ class HAL:
                 print >>file
 
         # check for dedicated feed override MPG
-        pinname = self.d.make_pinname(self.d.findsignal("fo-mpg-a"))
+        pinname = self.a.make_pinname(self.a.findsignal("fo-mpg-a"), substitution = self.d.useinisubstitution)
         if pinname:
             ending = ""
             if "enc" in pinname: ending = ".count"
@@ -534,7 +569,7 @@ class HAL:
                 print >>file, "    setp halui.feed-override.direct-value false"
                 print >>file, "    setp halui.feed-override.scale .01"
                 if pinname: # dedicated MPG
-                    if self.d.findsignal("fo-enable"): # make it enable-able externally 
+                    if self.a.findsignal("fo-enable"): # make it enable-able externally 
                         print >>file, "net  fo-enable           => halui.feed-override.count-enable"
                     else:
                         print >>file, "    setp halui.feed-override.count-enable true"
@@ -565,7 +600,7 @@ class HAL:
                 print >>file
 
         # check for dedicated max velocity MPG
-        pinname = self.d.make_pinname(self.d.findsignal("mvo-mpg-a"))
+        pinname = self.a.make_pinname(self.a.findsignal("mvo-mpg-a"), substitution = self.d.useinisubstitution)
         if pinname:
             ending = ""
             if "enc" in pinname: ending = ".count"
@@ -588,7 +623,7 @@ class HAL:
                 print >>file, "    setp halui.max-velocity.direct-value false"
                 print >>file, "    setp halui.max-velocity.scale %04f"% scale
                 if pinname: # dedicated MPG
-                    if self.d.findsignal("mvo-enable"): # make it enable-able externally 
+                    if self.a.findsignal("mvo-enable"): # make it enable-able externally 
                         print >>file, "net mvo-enable           =>  halui.max-velocity.count-enable"
                     else:
                         print >>file, "    setp halui.max-velocity.count-enable true"
@@ -619,7 +654,7 @@ class HAL:
                 print >>file
 
         # check for dedicated spindle override MPG
-        pinname = self.d.make_pinname(self.d.findsignal("so-mpg-a"))
+        pinname = self.a.make_pinname(self.a.findsignal("so-mpg-a"), substitution = self.d.useinisubstitution)
         if pinname:
             ending = ""
             if "enc" in pinname: ending = ".count"
@@ -634,25 +669,25 @@ class HAL:
             if self.d.so_usempg:
                 print >>file, "# connect spindle overide increments - MPG"
                 print >>file
-                print >>file, "    setp halui.spindle-override.direct-value false"
-                print >>file, "    setp halui.spindle-override.scale .01"
+                print >>file, "    setp halui.spindle.0.override.direct-value false"
+                print >>file, "    setp halui.spindle.0.override.scale .01"
                 if pinname: # dedicated MPG
-                    if self.d.findsignal("so-enable"): # make it enable-able externally
-                        print >>file, "net so-enable             =>  halui.spindle-override.count-enable"
+                    if self.a.findsignal("so-enable"): # make it enable-able externally
+                        print >>file, "net so-enable             =>  halui.spindle.0.override.count-enable"
                     else:
-                        print >>file, "    setp halui.spindle-override.count-enable true"
-                    print >>file, "net so-count              =>  halui.spindle-override.counts"
+                        print >>file, "    setp halui.spindle.0.override.count-enable true"
+                    print >>file, "net so-count              =>  halui.spindle.0.override.counts"
                 else: # shared MPG
-                    print >>file, "net so-enable             =>  halui.spindle-override.count-enable"
-                    print >>file, "net axis-selected-count  =>  halui.spindle-override.counts"
+                    print >>file, "net so-enable             =>  halui.spindle.0.override.count-enable"
+                    print >>file, "net axis-selected-count  =>  halui.spindle.0.override.counts"
                 print >>file
             elif self.d.so_useswitch:
                 print >>file, "# connect spindle overide increments "
                 print >>file
-                print >>file, "    setp halui.spindle-override.count-enable true"
-                print >>file, "    setp halui.spindle-override.direct-value true"
-                print >>file, "    setp halui.spindle-override.scale .01"
-                print >>file, "net spindleoverride-incr  =>  halui.spindle-override.counts"
+                print >>file, "    setp halui.spindle.0.override.count-enable true"
+                print >>file, "    setp halui.spindle.0.override.direct-value true"
+                print >>file, "    setp halui.spindle.0.override.scale .01"
+                print >>file, "net spindleoverride-incr  =>  halui.spindle.0.override.counts"
                 print >>file, "net so-incr-a             =>  soincr.sel0"
                 print >>file, "net so-incr-b             =>  soincr.sel1"
                 print >>file, "net so-incr-c             =>  soincr.sel2"
@@ -675,11 +710,11 @@ class HAL:
         print >>file
         for i in range(4):
             dout = "dout-%02d" % i
-            if self.d.findsignal(dout):
+            if self.a.findsignal(dout):
                 print >>file, "net %s     <=  motion.digital-out-%02d" % (dout, i)
         for i in range(4):
             din = "din-%02d" % i
-            if self.d.findsignal(din):
+            if self.a.findsignal(din):
                 print >>file, "net %s     =>  motion.digital-in-%02d" % (din, i)
         print >>file, _("#  ---estop signals---")
         print >>file
@@ -973,6 +1008,7 @@ class HAL:
         else: unit = "a metric"
         if self.d.frontend == _PD._AXIS: display = "AXIS"
         elif self.d.frontend == _PD._TKLINUXCNC: display = "Tklinuxcnc"
+        elif self.d.frontend == _PD._GMOCCAPY: display = "TOUCHY"
         elif self.d.frontend == _PD._TOUCHY: display = "TOUCHY"
         else: display = "an unknown"
         if self.d.axes == 0:machinetype ="XYZ"
@@ -1035,6 +1071,65 @@ class HAL:
 # helper functions
 #*******************
 
+    def build_pid(self, file, jnum, let, stepflag):
+        title = 'JOINT'
+        if let == 's':
+            title = 'SPINDLE'
+        print >>file, "setp   pid.%s.Pgain     [%s_%d]P" % (let, title, jnum)
+        print >>file, "setp   pid.%s.Igain     [%s_%d]I" % (let, title, jnum)
+        print >>file, "setp   pid.%s.Dgain     [%s_%d]D" % (let, title, jnum)
+        print >>file, "setp   pid.%s.bias      [%s_%d]BIAS" % (let, title, jnum)
+        print >>file, "setp   pid.%s.FF0       [%s_%d]FF0" % (let, title, jnum)
+        print >>file, "setp   pid.%s.FF1       [%s_%d]FF1" % (let, title, jnum)
+        print >>file, "setp   pid.%s.FF2       [%s_%d]FF2" % (let, title, jnum)
+        print >>file, "setp   pid.%s.deadband  [%s_%d]DEADBAND" % (let, title, jnum)
+        if let =='s' and self.d.suseoutputrange2:
+            print >>file, "net ratio_select.out   pid.%s.maxoutput " % (let)
+        else:
+            print >>file, "setp   pid.%s.maxoutput [%s_%d]MAX_OUTPUT" % (let, title, jnum)
+        # steppers
+        print >>file, "setp   pid.%s.error-previous-target true" % let
+        # steppers
+        if stepflag:
+            print >>file, "setp   pid.%s.maxerror .0005" % let
+        print >>file
+        if let == 's':
+            name = "spindle"
+        else:
+            name = let
+        print >>file, "net %s-index-enable  <=> pid.%s.index-enable" % (name, let)
+        print >>file, "net %s-enable        =>  pid.%s.enable" % (name, let)
+
+        if let == 's':
+            if self.d.susenegativevoltage:
+                signal = "spindle-vel-cmd-rpm"
+                fbsignal= "spindle-vel-fb-rpm"
+            else:
+                signal = "spindle-vel-cmd-rpm-abs"
+                fbsignal= "spindle-vel-fb-rpm-abs"
+            print >>file, "net %s     => pid.%s.command" % (signal, let)
+            print >>file, "net %s      => pid.%s.feedback"% (fbsignal, let)
+            if self.d.suseoutputrange2:
+                print >>file, "net spindle-pid-out  pid.s.output    => scale.gear.in"
+                print >>file, "net gear-ratio       ratio_select.out-f => scale.gear.gain"
+                print >>file, "setp ratio_select.in00 %f" % (1/float(self.d.gsincrvalue0))
+                print >>file, "setp ratio_select.in01 %f" % (1/float(self.d.gsincrvalue1))
+                #print >>file, "setp ratio_select.in2 %f" % self.d.gsincrvalue2
+                #print >>file, "setp ratio_select.in4 %f" % self.d.gsincrvalue4
+                print >>file, "net gear-select-a         =>  ratio_select.sel0"
+                #print >>file, "net gear-select-b ratio_select.sel1"
+                #print >>file, "net gear-select-c ratio_select.sel2"
+                print >>file, "net spindle-output        <=  scale.gear.out"
+            else:
+                print >>file, "net spindle-output        <=  pid.%s.output"% (let)
+        else:
+           print >>file, "net %s-pos-cmd       =>  pid.%s.command" % (name, let)
+           #print >>file, "net %s-vel-cmd       =>  pid.%s.command-deriv" % (name, let) # This must be connected to something
+           print >>file, "net %s-pos-fb        =>  pid.%s.feedback"% (name,let)
+           print >>file, "net %s-output        <=  pid.%s.output"% (name, let)
+           #print >>file, "net %s-vel-fb           => pid.%s.feedback-deriv"% (name, let) # This must be connected to something
+        print >>file
+
     def connect_joint(self, file, jnum, let):
         def get(s): return self.d[let + s]
         title = 'JOINT'
@@ -1042,26 +1137,26 @@ class HAL:
             title = 'SPINDLE'
         closedloop = False
         pwmpin = self.a.pwmgen_sig(let)
-        pwmpinname = self.d.make_pinname(pwmpin)
+        pwmpinname = self.a.make_pinname(pwmpin, substitution = self.d.useinisubstitution)
         if pwmpinname and not 'serial' in pwmpin: # TODO allow sserial PWM to be inverted
             pwminvertlist = self.a.pwmgen_invert_pins(pwmpin)
         if not pwmpin == None:
             pwmtype = self.a.pwmgen_sig(let)+"type"
         else:
             pwmtype = None
-        tppwmpinname = self.d.make_pinname(self.a.tppwmgen_sig(let))
+        tppwmpinname = self.a.make_pinname(self.a.tppwmgen_sig(let), substitution = self.d.useinisubstitution)
         tppwm_six = self.a.tppwmgen_has_6(let)
-        steppinname = self.d.make_pinname(self.a.stepgen_sig(let))
-        steppinname2 = self.d.make_pinname(self.a.stepgen_sig(let+"2"))
-        bldc_control = self.d[let+"bldc_option"]
+        steppinname = self.a.make_pinname(self.a.stepgen_sig(let), substitution = self.d.useinisubstitution)
+        try:
+            bldc_control = self.d[let+"bldc_option"]
+        except:
+            bldc_control = False
         if steppinname:
             stepinvertlist = self.a.stepgen_invert_pins(self.a.stepgen_sig(let))
-        if steppinname2:
-            stepinvertlist2 = self.a.stepgen_invert_pins(self.a.stepgen_sig(let+"2"))
-        encoderpinname = self.d.make_pinname(self.a.encoder_sig(let))
-        amp8i20pinname = self.d.make_pinname(self.a.amp_8i20_sig(let))
-        resolverpinname = self.d.make_pinname(self.a.resolver_sig(let))
-        potpinname = self.d.make_pinname(self.a.potoutput_sig(let))
+        encoderpinname = self.a.make_pinname(self.a.encoder_sig(let), substitution = self.d.useinisubstitution)
+        amp8i20pinname = self.a.make_pinname(self.a.amp_8i20_sig(let), substitution = self.d.useinisubstitution)
+        resolverpinname = self.a.make_pinname(self.a.resolver_sig(let), substitution = self.d.useinisubstitution)
+        potpinname = self.a.make_pinname(self.a.potoutput_sig(let), substitution = self.d.useinisubstitution)
         if potpinname:
             potinvertlist = self.a.spindle_invert_pins(self.a.potoutput_sig(let))
         if steppinname and encoderpinname and not let == 's': closedloop = True
@@ -1069,11 +1164,16 @@ class HAL:
         print let + " is closedloop? "+ str(closedloop)
         print " ENCODER:",encoderpinname," RESOLVER:",resolverpinname
         print " PWM:",pwmpinname," 3PWM:",tppwmpinname," 8i20:",amp8i20pinname
-        print " STEPPER:",steppinname, "STEPPER2:",steppinname2
+        print " STEPPER:",steppinname
         print " POTENTIOMETER:",potpinname
         lat = self.d.latency
         print >>file, "#*******************"
-        print >>file, "#  %s %s" % (title, let.upper())
+        if let.upper() == 'S':
+            print >>file, "#  SPINDLE"
+        elif len(let) >1:
+            print >>file, "#  Tandem AXIS %s %s %d" % (let.upper(), title, jnum )
+        else:
+            print >>file, "#  AXIS %s %s %d" % (let.upper(), title, jnum )
         print >>file, "#*******************"
         print >>file
 
@@ -1142,61 +1242,9 @@ class HAL:
             print >>file, "net %s-enable             bldc.%d.init"% (let,jnum)
             print >>file, "net %s-is-init           bldc.%s.init-done"% (let,jnum)
             print >>file
-        if 1==1: # FIXME
-                print >>file, "setp   pid.%s.Pgain     [%s_%d]P" % (let, title, jnum)
-                print >>file, "setp   pid.%s.Igain     [%s_%d]I" % (let, title, jnum)
-                print >>file, "setp   pid.%s.Dgain     [%s_%d]D" % (let, title, jnum)
-                print >>file, "setp   pid.%s.bias      [%s_%d]BIAS" % (let, title, jnum)
-                print >>file, "setp   pid.%s.FF0       [%s_%d]FF0" % (let, title, jnum)
-                print >>file, "setp   pid.%s.FF1       [%s_%d]FF1" % (let, title, jnum)
-                print >>file, "setp   pid.%s.FF2       [%s_%d]FF2" % (let, title, jnum)
-                print >>file, "setp   pid.%s.deadband  [%s_%d]DEADBAND" % (let, title, jnum)
-                if let =='s' and self.d.suseoutputrange2:
-                    print >>file, "net ratio_select.out   pid.%s.maxoutput " % (let)
-                else:
-                    print >>file, "setp   pid.%s.maxoutput [%s_%d]MAX_OUTPUT" % (let, title, jnum)
-                # steppers
-                print >>file, "setp   pid.%s.error-previous-target true" % let
-                # steppers
-                if steppinname:
-                    print >>file, "setp   pid.%s.maxerror .0005" % let
-                print >>file
-                if let == 's':
-                    name = "spindle"
-                else:
-                    name = let
-                print >>file, "net %s-index-enable  <=> pid.%s.index-enable" % (name, let)
-                print >>file, "net %s-enable        =>  pid.%s.enable" % (name, let)
 
-                if let == 's':
-                    if self.d.susenegativevoltage:
-                        signal = "spindle-vel-cmd-rpm"
-                        fbsignal= "spindle-vel-fb-rpm"
-                    else:
-                        signal = "spindle-vel-cmd-rpm-abs"
-                        fbsignal= "spindle-vel-fb-rpm-abs"
-                    print >>file, "net %s     => pid.%s.command" % (signal, let)
-                    print >>file, "net %s      => pid.%s.feedback"% (fbsignal, let)
-                    if self.d.suseoutputrange2:
-                        print >>file, "net spindle-pid-out  pid.s.output    => scale.gear.in"
-                        print >>file, "net gear-ratio       ratio_select.out-f => scale.gear.gain"
-                        print >>file, "setp ratio_select.in00 %f" % (1/float(self.d.gsincrvalue0))
-                        print >>file, "setp ratio_select.in01 %f" % (1/float(self.d.gsincrvalue1))
-                        #print >>file, "setp ratio_select.in2 %f" % self.d.gsincrvalue2
-                        #print >>file, "setp ratio_select.in4 %f" % self.d.gsincrvalue4
-                        print >>file, "net gear-select-a         =>  ratio_select.sel0"
-                        #print >>file, "net gear-select-b ratio_select.sel1"
-                        #print >>file, "net gear-select-c ratio_select.sel2"
-                        print >>file, "net spindle-output        <=  scale.gear.out"
-                    else:
-                        print >>file, "net spindle-output        <=  pid.%s.output"% (let)
-                else:
-                    print >>file, "net %s-pos-cmd       =>  pid.%s.command" % (name, let)
-                    print >>file, "net %s-vel-cmd       =>  pid.%s.command-deriv" % (name, let) # This must be connected to something
-                    print >>file, "net %s-pos-fb        =>  pid.%s.feedback"% (name,let)
-                    print >>file, "net %s-output        =>  pid.%s.output"% (name, let)
-                    #print >>file, "net %s-vel-fb           => pid.%s.feedback-deriv"% (name, let) # This must be connected to something
-                print >>file
+        stepflag = bool(steppinname !=None)
+        self.build_pid(file, jnum, let, stepflag)
 
         if tppwmpinname:
                 print >>file, "# ---TPPWM Generator signals/setup---"
@@ -1238,7 +1286,7 @@ class HAL:
             print >>file
             # sserial daughter board PWMGENS eg 7i77
             if "analogout" in pwmpinname:
-                rawpinname = self.d.make_pinname(pwmpin,False,True) # dont want the component name
+                rawpinname = self.a.make_pinname(pwmpin, gpionumber = False, prefixonly = True, substitution = self.d.useinisubstitution) # dont want the component name
 
                 if let == 's':
                     print >>file, "setp   "+pwmpinname+"-scalemax  [%s_%d]OUTPUT_SCALE"% (title, jnum)
@@ -1253,14 +1301,14 @@ class HAL:
                     print >>file, "setp   "+pwmpinname+"-minlim    [%s_%d]OUTPUT_MIN_LIMIT"% (title, jnum)
                     print >>file, "setp   "+pwmpinname+"-maxlim    [%s_%d]OUTPUT_MAX_LIMIT"% (title, jnum)
                     print >>file
-                    print >>file, "net %s-output                             => "% (let) + pwmpinname
-                    print >>file, "net %s-pos-cmd    joint.%d.motor-pos-cmd" % (let, jnum )
-                    print >>file, "net %s-enable     joint.%d.amp-enable-out"% (let,jnum)
+                    print >>file, "net %s-output     => "% (let) + pwmpinname
+                    print >>file, "net %s-pos-cmd    <= joint.%d.motor-pos-cmd" % (let, jnum )
+                    print >>file, "net %s-enable     <= joint.%d.amp-enable-out"% (let,jnum)
                     if 'analogout5' in pwmpinname: # on the 7i77 analog out 5 has it's own enable
                         print >>file, "net %s-enable   %spinena"% (let,rawpinname)
                     if let == "x":
                         print >>file, "# enable _all_ sserial pwmgens"
-                        print >>file, "net %s-enable   %sanalogena"% (let,rawpinname)
+                        print >>file, "net %s-enable   => %sanalogena"% (let,rawpinname)
                 print >>file
 
             else:
@@ -1288,7 +1336,10 @@ class HAL:
                 print >>file
 
         if steppinname:
-            print >>file, "# Step Gen signals/setup"
+            if len(let) >1:
+                print >>file, "# Step Gen signals/setup for tandem axis"
+            else:
+                print >>file, "# Step Gen signals/setup"
             print >>file
             print >>file, "setp   " + steppinname + ".dirsetup        [%s_%d]DIRSETUP"% (title, jnum)
             print >>file, "setp   " + steppinname + ".dirhold         [%s_%d]DIRHOLD"% (title, jnum)
@@ -1321,37 +1372,6 @@ class HAL:
             print >>file, "net %s-pos-fb     => joint.%d.motor-pos-fb" % (let, jnum )
             print >>file, "net %s-enable     <= joint.%d.amp-enable-out"% (let,jnum)
             print >>file, "net %s-enable     => %s.enable"% (let, steppinname)
-            print >>file
-
-        if steppinname2:
-            steppinname = steppinname2
-            print >>file, "# Step Gen signals/setup for tandem axis stepper"
-            print >>file
-            print >>file, "setp   " + steppinname + ".dirsetup        [%s_%d]DIRSETUP"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".dirhold         [%s_%d]DIRHOLD"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".steplen         [%s_%d]STEPLEN"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".stepspace       [%s_%d]STEPSPACE"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".position-scale  [%s_%d]STEP_SCALE"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".step_type        0"
-            if closedloop:
-                print >>file, "setp   " + steppinname + ".control-type     1"
-            else:
-                print >>file, "setp   " + steppinname + ".control-type     0"
-            print >>file, "setp   " + steppinname + ".maxaccel         [%s_%d]STEPGEN_MAXACCEL"% (title, jnum)
-            print >>file, "setp   " + steppinname + ".maxvel           [%s_%d]STEPGEN_MAXVEL"% (title, jnum)
-            for i in stepinvertlist2:
-                   print >>file, "setp    "+i+".invert_output true"
-            if closedloop:
-                print >>file
-                print >>file, "# ---closedloop stepper signals---"
-                print >>file
-                print >>file, "net %s-output                             => "% (let) + steppinname + ".velocity-cmd"
-                print >>file, "net %s-enable                             => "% (let) + steppinname +".enable"
-            else:
-                print >>file
-                print >>file, "net %s2-pos-fb                            <=  " % (let) + steppinname + ".position-fb"
-                print >>file, "net %s-pos-cmd                            =>  " % (let) + steppinname + ".position-cmd"
-                print >>file, "net %s-enable                             =>  " % (let)+ steppinname + ".enable"
             print >>file
 
         if encoderpinname:             
@@ -1399,20 +1419,20 @@ class HAL:
         if let =='s':
             print >>file, "# ---setup spindle control signals---" 
             print >>file
-            print >>file, "net spindle-vel-cmd-rps        <=  motion.spindle-speed-out-rps"
-            print >>file, "net spindle-vel-cmd-rps-abs    <=  motion.spindle-speed-out-rps-abs"
-            print >>file, "net spindle-vel-cmd-rpm        <=  motion.spindle-speed-out"
-            print >>file, "net spindle-vel-cmd-rpm-abs    <=  motion.spindle-speed-out-abs"
-            print >>file, "net spindle-enable             <=  motion.spindle-on"
-            print >>file, "net spindle-cw                 <=  motion.spindle-forward"
-            print >>file, "net spindle-ccw                <=  motion.spindle-reverse"
-            print >>file, "net spindle-brake              <=  motion.spindle-brake"            
-            print >>file, "net spindle-revs               =>  motion.spindle-revs"
-            print >>file, "net spindle-at-speed           =>  motion.spindle-at-speed"
-            print >>file, "net spindle-vel-fb-rps         =>  motion.spindle-speed-in"
-            print >>file, "net spindle-index-enable      <=>  motion.spindle-index-enable"
+            print >>file, "net spindle-vel-cmd-rps        <=  spindle.0.speed-out-rps"
+            print >>file, "net spindle-vel-cmd-rps-abs    <=  spindle.0.speed-out-rps-abs"
+            print >>file, "net spindle-vel-cmd-rpm        <=  spindle.0.speed-out"
+            print >>file, "net spindle-vel-cmd-rpm-abs    <=  spindle.0.speed-out-abs"
+            print >>file, "net spindle-enable             <=  spindle.0.on"
+            print >>file, "net spindle-cw                 <=  spindle.0.forward"
+            print >>file, "net spindle-ccw                <=  spindle.0.reverse"
+            print >>file, "net spindle-brake              <=  spindle.0.brake"
+            print >>file, "net spindle-revs               =>  spindle.0.revs"
+            print >>file, "net spindle-at-speed           =>  spindle.0.at-speed"
+            print >>file, "net spindle-vel-fb-rps         =>  spindle.0.speed-in"
+            print >>file, "net spindle-index-enable      <=>  spindle.0.index-enable"
             print >>file
-            if not self.d.findsignal("spindle-at-speed"):
+            if not self.a.findsignal("spindle-at-speed"):
                 print >>file, "# ---Setup spindle at speed signals---"
                 print >>file
                 if (encoderpinname or resolverpinname) and self.d.suseatspeed:
@@ -1467,7 +1487,7 @@ class HAL:
             # for input pins
             if t == _PD.GPIOI:
                 if not p == "unused-input":
-                    pinname = self.d.make_pinname(pname) 
+                    pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution) 
                     print >>file, "\n# ---",p.upper(),"---"
                     if "parport" in pinname:
                         if i: print >>file, "net %s     <= %s-not" % (p, pinname)
@@ -1483,7 +1503,7 @@ class HAL:
                 if not p == "unused-encoder":
                     for sig in (self.d.halencoderinputsignames):
                        if p == sig+"-a":
-                            pinname = self.d.make_pinname(self.d.findsignal( p ))
+                            pinname = self.a.make_pinname(self.a.findsignal( p ), substitution = self.d.useinisubstitution)
                             print >>file, "\n# ---",sig.upper(),"---"
                             print >>file, "net %s         <=  "% (sig+"-position")+pinname +".position"
                             print >>file, "net %s            <=  "% (sig+"-count")+pinname +".count"
@@ -1500,7 +1520,7 @@ class HAL:
                 if not p == "unused-resolver":
                     for sig in (self.d.halresolversignames):
                        if p == sig:
-                            pinname = self.d.make_pinname(self.d.findsignal( p ))
+                            pinname = self.a.make_pinname(self.a.findsignal( p ), substitution = self.d.useinisubstitution)
                             print >>file, "\n# ---",sig.upper(),"---"
                             print >>file, "net %s         <=  "% (sig+"-position")+pinname +".position"
                             print >>file, "net %s            <=  "% (sig+"-count")+pinname +".count"
@@ -1518,7 +1538,7 @@ class HAL:
             # for analog in pins
             elif t == (_PD.ANALOGIN):
                 if not p == "unused-analog-input":
-                            pinname = self.d.make_pinname(self.d.findsignal( p ))
+                            pinname = self.a.make_pinname(self.a.findsignal( p ), substitution = self.d.useinisubstitution)
                             print >>file, "\n# ---",p.upper(),"---"
                             print >>file, "net %s         <=  "% (p)+pinname
 
@@ -1562,7 +1582,7 @@ class HAL:
             # for output /open drain pins
             if t in (_PD.GPIOO,_PD.GPIOD):
                 if not p == "unused-output":
-                    pinname = self.d.make_pinname(pname)
+                    pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution)
                     print >>file, "\n# ---",p.upper(),"---"
                     if "parport" in pinname:
                         if p == "force-pin-true":
@@ -1594,7 +1614,7 @@ class HAL:
                 if not p == "unused-pwm":
                     for sig in (self.d.halpwmoutputsignames):
                         if p == (sig+"-pulse"):
-                            pinname = self.d.make_pinname(pname)
+                            pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution)
                             print >>file, "\n# ---",sig.upper(),"---"
                             if t == _PD.PWMP:
                                 print >>file, "setp    "+pinname +".output-type 1"
@@ -1615,7 +1635,7 @@ class HAL:
                 if not p == "unused-tppwmgen":
                     for sig in (self.d.haltppwmoutputsignames):
                         if p == (sig+"-a"):
-                            pinname = self.d.make_pinname(pname) 
+                            pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution) 
                             print >>file, "\n# ---",sig.upper(),"---"
                             print >>file, "net %s           <=  "% (sig+"-enable")+pinname +".enable"
                             print >>file, "net %s           <=  "% (sig+"-a-value")+pinname +".A-value"
@@ -1633,17 +1653,17 @@ class HAL:
                 if not p == "unused-stepgen":
                     for sig in (self.d.halsteppersignames):
                         if p == (sig+"-step"):
-                            pinname = self.d.make_pinname(pname) 
+                            pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution) 
                             print >>file, "\n# ---",sig.upper(),"---"
                             print >>file, "net %s           <=  "% (sig+"-enable")+pinname +".enable"  
                             print >>file, "net %s            <=  "% (sig+"-count")+pinname +".counts" 
                             print >>file, "net %s     <=  "% (sig+"-cmd-position")+pinname +".position-cmd"  
                             print >>file, "net %s     <=  "% (sig+"-act-position")+pinname +".position-fb" 
                             print >>file, "net %s         <=  "% (sig+"-velocity")+pinname +".velocity-fb"
-                            pinlist = self.d.list_related_pins([_PD.STEPA,_PD.STEPB], boardnum, connector, channel, pin, 0)
+                            pinlist = self.a.list_related_pins([_PD.STEPA,_PD.STEPB], boardnum, connector, channel, pin, 0)
                             for i in pinlist:
                                 if self.d[i[0]+"inv"]:
-                                    gpioname = self.d.make_pinname(i[0],True)
+                                    gpioname = self.a.make_pinname(i[0],gpionumber = True, substitution = self.d.useinisubstitution)
                                     print >>file, "setp    "+gpioname+".invert_output true"
                             for ending in ("position-scale","maxvel","maxaccel","steplen","stepspace","dirsetup","dirhold","step_type"):
                                 title = sig + "-%s"% ending
@@ -1658,12 +1678,12 @@ class HAL:
                     for sig in (self.d.halpotsignames):
                         print "looking",p,sig
                         if p == (sig+"-output"):
-                            pinname = self.d.make_pinname(pname) 
+                            pinname = self.a.make_pinname(pname, substitution = self.d.useinisubstitution) 
                             print >>file, "\n# ---",sig.upper(),"---"
                             print >>file, "net %s            =>  "% (sig+"-enable")+pinname +".spinena"  
                             print >>file, "net %s            =>  "% (sig+"-output")+pinname +".spinout" 
                             print >>file, "net %s          =>  "% (sig+"-direction")+pinname +".spindir"
-                            pinlist = self.d.list_related_pins([_PD.POTO,_PD.POTE], boardnum, port, channel, pin, 0)
+                            pinlist = self.a.list_related_pins([_PD.POTO,_PD.POTE], boardnum, port, channel, pin, 0)
                             for i in pinlist:
                                 if self.d[i[0]+"inv"]:
                                     if self.d[i[0]+"type"] == _PD.POTO:

@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 namespace eval linuxcnc {
     variable HOME @EMC2_HOME@
@@ -76,7 +76,7 @@ proc hal {args} {
 # called *.msg, (e.g. en_US.msg).
 package require msgcat
 if {$linuxcnc::_langinit && [info exists env(LANG)]} {
-    msgcat::mclocale $env(LANG)
+    msgcat::mclocale
     msgcat::mcload $linuxcnc::LANG_DIR
     set linuxcnc::_langinit 0
 }

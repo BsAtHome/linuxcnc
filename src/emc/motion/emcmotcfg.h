@@ -24,6 +24,7 @@
 /* number of axes defined by the interp */ //FIXME: shouldn't be here..
 #define EMCMOT_MAX_AXIS 9
 
+#define EMCMOT_MAX_SPINDLES 8
 #define EMCMOT_MAX_DIO 64
 #define EMCMOT_MAX_AIO 64
 
@@ -42,8 +43,6 @@
 
 /* default comm timeout, in seconds */
 #define DEFAULT_EMCMOT_COMM_TIMEOUT 1.0
-/* seconds to delay between comm retries */
-#define DEFAULT_EMCMOT_COMM_WAIT 0.010
 
 /* initial velocity, accel used for coordinated moves */
 #define DEFAULT_VELOCITY 1.0

@@ -14,7 +14,7 @@
  *
  *    You should have received a copy of the GNU General Public License
  *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /* Without Source Tree */
@@ -345,7 +345,7 @@ static inline void spi1_xfer_setup(hm2_rpspi_t *hm2, bool rd)
 /*
  * HM2 interface: Write buffer to SPI1
  */
-static int hm2_rpspi_write_spi1(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
+static int hm2_rpspi_write_spi1(hm2_lowlevel_io_t *llio, uint32_t addr, const void *buffer, int size)
 {
 	hm2_rpspi_t *hm2 = (hm2_rpspi_t *)llio;
 	uint32_t cmd;
@@ -530,7 +530,7 @@ static inline void spi0_xfer_setup(hm2_rpspi_t *hm2, bool rd)
 /*
  * HM2 interface: Write buffer to SPI0
  */
-static int hm2_rpspi_write_spi0(hm2_lowlevel_io_t *llio, uint32_t addr, void *buffer, int size)
+static int hm2_rpspi_write_spi0(hm2_lowlevel_io_t *llio, uint32_t addr, const void *buffer, int size)
 {
 	hm2_rpspi_t *hm2 = (hm2_rpspi_t *)llio;
 	uint32_t cs;

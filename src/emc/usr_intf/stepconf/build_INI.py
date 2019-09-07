@@ -17,13 +17,16 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #
 #    This builds the INI file from the collected data.
 #
 
 import os
 import time
+import sys
+reload(sys)
+sys.setdefaultencoding('utf8')
 
 class INI:
     def __init__(self,app):
@@ -35,9 +38,11 @@ class INI:
 
     def write_inifile(self, base):
         if self.d.axes == 2:
-            maxvel = max(self.d.xmaxvel, self.d.zmaxvel)        
+            maxvel = max(self.d.xmaxvel, self.d.zmaxvel)
+        elif self.d.axes == 4:
+            maxvel = max(self.d.xmaxvel, self.d.ymaxvel)
         else:
-            maxvel = max(self.d.xmaxvel, self.d.ymaxvel, self.d.zmaxvel)        
+            maxvel = max(self.d.xmaxvel, self.d.ymaxvel, self.d.zmaxvel)
         hypotvel = (self.d.xmaxvel**2 + self.d.ymaxvel**2 + self.d.zmaxvel**2) **.5
         defvel = min(maxvel, max(.1, maxvel/10.))
 
@@ -54,7 +59,7 @@ class INI:
 
         # the joints_axes conversion script named 'update_ini'
         # will try to update for joints_axes if no VERSION is set
-        print >>file, "VERSION = 1.0"
+        print >>file, "VERSION = 1.1"
 
         print >>file
         print >>file, "[DISPLAY]"
@@ -104,6 +109,7 @@ class INI:
         elif self.d.axes == 1: num_joints = 4 # X Y Z A
         elif self.d.axes == 2: num_joints = 2 # X Z
         elif self.d.axes == 3: num_joints = 4 # X Y U V
+        elif self.d.axes == 4: num_joints = 2 # X Y
         else:
             print "___________________unknown self.d.axes",self.d.axes
 
@@ -111,6 +117,7 @@ class INI:
         elif self.d.axes == 0: coords = "X Y Z"
         elif self.d.axes == 2: coords = "X Z"
         elif self.d.axes == 3: coords = "X Y U V"
+        elif self.d.axes == 4: coords = "X Y"
 
         print >>file,  "[KINS]"
         # trivial kinematics: no. of joints == no.of axes)
@@ -121,6 +128,7 @@ class INI:
         print >>file, "[FILTER]"
         print >>file, "PROGRAM_EXTENSION = .png,.gif,.jpg Greyscale Depth Image"
         print >>file, "PROGRAM_EXTENSION = .py Python Script"
+        print >>file, "PROGRAM_EXTENSION = .nc,.tap G-Code File"
         print >>file, "png = image-to-gcode"
         print >>file, "gif = image-to-gcode"
         print >>file, "jpg = image-to-gcode"
@@ -141,7 +149,6 @@ class INI:
         print >>file, "[EMCMOT]"
         print >>file, "EMCMOT = motmod"
         print >>file, "COMM_TIMEOUT = 1.0"
-        print >>file, "COMM_WAIT = 0.010"
         print >>file, "BASE_PERIOD = %d" % base_period
         print >>file, "SERVO_PERIOD = 1000000"
 
@@ -170,7 +177,6 @@ class INI:
         else:
             print >>file, "LINEAR_UNITS = inch"
         print >>file, "ANGULAR_UNITS = degree"
-        print >>file, "CYCLE_TIME = 0.010"
         print >>file, "DEFAULT_LINEAR_VELOCITY = %.2f" % defvel
         print >>file, "MAX_LINEAR_VELOCITY = %.2f" % maxvel
         print >>file
@@ -202,6 +208,8 @@ class INI:
             self.write_one_axis(file, 1, "y", "LINEAR", all_homes)
             self.write_one_axis(file, 2, "u", "LINEAR", all_homes)
             self.write_one_axis(file, 3, "v", "LINEAR", all_homes)
+        if self.d.axes == 4: # xY
+            self.write_one_axis(file, 1, "y", "LINEAR", all_homes)
         file.close()
         self.d.add_md5sum(filename)
 

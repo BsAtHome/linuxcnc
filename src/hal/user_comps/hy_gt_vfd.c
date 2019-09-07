@@ -17,7 +17,7 @@
 
     You should have received a copy of the GNU Lesser General Public
     License along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301-1307 USA.
 */
 
 #include <errno.h>
@@ -156,7 +156,7 @@ void usage(int argc, char **argv) {
         "        the following: 1200, 2400, 4800, 9600, 19200, 38400\n"
         "    -b, --bits BITS (default 8)\n"
         "        Set number of data bits to BITS, must be between 5 and 8 inclusive.\n"
-        "    -p, --parity PARITY (defalt none)\n"
+        "    -p, --parity PARITY (default none)\n"
         "        Set serial parity to one of 'even', 'odd', or 'none'.\n"
         "    -s, --stopbits {1,2} (default 1)\n"
         "        Set serial stop bits to 1 or 2.\n"
@@ -485,12 +485,14 @@ int main(int argc, char **argv) {
         modbus_set_response_timeout(mb, &t);
 #endif
 
-        // Set the byte timeout to -1, to just wait for the complete
+        // Disable the byte timeout so it just waits for the complete
         // response timeout instead.
-        t.tv_sec = -1;
 #if (LIBMODBUS_VERSION_CHECK(3, 1, 2))
-        modbus_set_response_timeout(mb, t.tv_sec, t.tv_usec);
+        t.tv_sec = 0;
+        t.tv_usec = 0;
+        modbus_set_byte_timeout(mb, t.tv_sec, t.tv_usec);
 #else
+        t.tv_sec = -1;
         modbus_set_byte_timeout(mb, &t);
 #endif
     }

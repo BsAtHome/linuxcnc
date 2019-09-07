@@ -12,7 +12,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import rs274.OpenGLTk, Tkinter, signal, hal
 from minigl import *
@@ -919,7 +919,7 @@ class AsciiSTL:
                         dx2 = t[2][0] - t[0][0]
                         dy2 = t[2][1] - t[0][1]
                         dz2 = t[2][2] - t[0][2]
-                        n = [y1*z2 - y2*z1, z1*x2 - z2*x1, y1*x2 - y2*x1]
+                        n = [dy1*dz2 - dy2*dz1, dz1*dx2 - dz2*dx1, dy1*dx2 - dy2*dx1]
                     d.append((n, t))
                     t = []
                     n = [0,0,0]

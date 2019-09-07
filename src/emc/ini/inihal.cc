@@ -16,7 +16,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 ----------------------------------------------------------------------*/
 #include "rcs_print.hh"
 #include "emc.hh"
@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "hal.h"
 #include "rtapi.h"
 #include "inihal.hh"
+#include "iniaxis.hh"
 
 static int debug=0;
 static int comp_id;
@@ -76,6 +77,9 @@ static ptr_inihal_data *the_inihal_data;
 #define SHOW_CHANGE_IDX(NAME,IDX) \
     fprintf(stderr,"Changed: "#NAME"[%d] %g-->%g\n",IDX,old_inihal_data.NAME[IDX], \
                                                         new_inihal_data.NAME[IDX]);
+#define SHOW_CHANGE_IDX_INT(NAME,IDX) \
+    fprintf(stderr,"Changed: "#NAME"[%d] %d-->%d\n",IDX,old_inihal_data.NAME[IDX], \
+                                                        new_inihal_data.NAME[IDX]);
 #define MAKE_BIT_PIN(NAME,DIR) \
 do { \
      retval = hal_pin_bit_newf(DIR,&(the_inihal_data->NAME),comp_id,PREFIX#NAME); \
@@ -85,6 +89,13 @@ do { \
 #define MAKE_S32_PIN(NAME,DIR) \
 do { \
      retval = hal_pin_s32_newf(DIR,&(the_inihal_data->NAME),comp_id,PREFIX#NAME); \
+     if (retval < 0) return retval; \
+   } while (0)
+
+#define MAKE_S32_PIN_IDX(NAME,HALPIN_NAME,DIR,IDX) \
+do { \
+     retval = hal_pin_s32_newf(DIR,&(the_inihal_data->NAME[IDX]),\
+                               comp_id,PREFIX"%d."#HALPIN_NAME,IDX); \
      if (retval < 0) return retval; \
    } while (0)
 
@@ -146,6 +157,7 @@ int ini_hal_init(int numjoints)
         MAKE_FLOAT_PIN_IDX(joint_max_acceleration,max_acceleration,HAL_IN,idx);
         MAKE_FLOAT_PIN_IDX(joint_home,home,HAL_IN,idx);
         MAKE_FLOAT_PIN_IDX(joint_home_offset,home_offset,HAL_IN,idx);
+        MAKE_S32_PIN_IDX(  joint_home_sequence,home_sequence,HAL_IN,idx);
     }
     for (int idx = 0; idx < EMCMOT_MAX_AXIS; idx++) {
         char letter = "xyzabcuvw"[idx];
@@ -195,6 +207,7 @@ int ini_hal_init_pins(int numjoints)
         INIT_PIN(joint_max_acceleration[idx]);
         INIT_PIN(joint_home[idx]);
         INIT_PIN(joint_home_offset[idx]);
+        INIT_PIN(joint_home_sequence[idx]);
     }
     for (int idx = 0; idx < EMCMOT_MAX_AXIS; idx++) {
         INIT_PIN(axis_min_limit[idx]);
@@ -332,15 +345,19 @@ int check_ini_hal_items(int numjoints)
         }
         if (   CHANGED_IDX(joint_home,idx)
             || CHANGED_IDX(joint_home_offset,idx)
+            || CHANGED_IDX(joint_home_sequence,idx)
            ) {
             if (debug) {
                 SHOW_CHANGE_IDX(joint_home,idx);
                 SHOW_CHANGE_IDX(joint_home_offset,idx);
+                SHOW_CHANGE_IDX_INT(joint_home_sequence,idx);
             }
             UPDATE_IDX(joint_home,idx);
             UPDATE_IDX(joint_home_offset,idx);
+            UPDATE_IDX(joint_home_sequence,idx);
             if  (0 != emcJointUpdateHomingParams(idx, NEW(joint_home[idx]),
-                                                      NEW(joint_home_offset[idx]))
+                                                      NEW(joint_home_offset[idx]),
+                                                      NEW(joint_home_sequence[idx]))
                 ) {
                 if (emc_debug & EMC_DEBUG_CONFIG) {
                     rcs_print_error("check_ini_hal_items:bad return from emcJointUpdateHomingParams\n");
@@ -389,7 +406,9 @@ int check_ini_hal_items(int numjoints)
         if (CHANGED_IDX(axis_max_velocity,idx) ) {
             if (debug) SHOW_CHANGE_IDX(axis_max_velocity,idx);
             UPDATE_IDX(axis_max_velocity,idx);
-            if (0 != emcAxisSetMaxVelocity(idx,NEW(axis_max_velocity[idx]))) {
+            if (0 != emcAxisSetMaxVelocity(idx,
+                  (1 - ext_offset_a_or_v_ratio[idx]) * NEW(axis_max_velocity[idx]),
+                  (    ext_offset_a_or_v_ratio[idx]) * NEW(axis_max_velocity[idx]))) {
                 if (emc_debug & EMC_DEBUG_CONFIG) {
                     rcs_print_error("check_ini_hal_items:bad return from emcAxisSetMaxVelocity\n");
                 }
@@ -398,7 +417,9 @@ int check_ini_hal_items(int numjoints)
         if (CHANGED_IDX(axis_max_acceleration,idx) ) {
             if (debug) SHOW_CHANGE_IDX(axis_max_acceleration,idx);
             UPDATE_IDX(axis_max_acceleration,idx);
-            if (0 != emcAxisSetMaxAcceleration(idx,NEW(axis_max_acceleration[idx]))) {
+            if (0 != emcAxisSetMaxAcceleration(idx,
+                  (1 - ext_offset_a_or_v_ratio[idx]) * NEW(axis_max_acceleration[idx]),
+                  (    ext_offset_a_or_v_ratio[idx]) * NEW(axis_max_acceleration[idx]))) {
                 if (emc_debug & EMC_DEBUG_CONFIG) {
                     rcs_print_error("check_ini_hal_items:bad return from emcAxisSetMaxAcceleration\n");
                 }

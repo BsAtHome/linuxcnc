@@ -15,7 +15,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 ----------------------------------------------------------------------*/
 #ifndef INIHAL_H
 #define INIHAL_H
@@ -69,6 +69,7 @@ int ini_hal_init_pins(int numjoints);
     ARRAY(hal_float_t,joint_max_acceleration,EMCMOT_MAX_JOINTS) \
     ARRAY(hal_float_t,joint_home,EMCMOT_MAX_JOINTS) \
     ARRAY(hal_float_t,joint_home_offset,EMCMOT_MAX_JOINTS) \
+    ARRAY(hal_s32_t,  joint_home_sequence,EMCMOT_MAX_JOINTS) \
 \
     ARRAY(hal_float_t,axis_min_limit,EMCMOT_MAX_AXIS) \
     ARRAY(hal_float_t,axis_max_limit,EMCMOT_MAX_AXIS) \
@@ -81,7 +82,9 @@ struct PTR {
 };
 
 #pragma GCC diagnostic push
+#if defined(__GNUC__) && (__GNUC__ > 4)
 #pragma GCC diagnostic ignored "-Wignored-attributes"
+#endif
 template<class T> struct NATIVE {};
 template<> struct NATIVE<hal_bit_t> { typedef bool type; };
 template<> struct NATIVE<hal_s32_t> { typedef rtapi_s32 type; };

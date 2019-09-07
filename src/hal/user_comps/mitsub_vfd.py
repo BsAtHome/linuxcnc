@@ -15,7 +15,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 # user space component for controlling a misubishi inverter over the serial port using rs485 standard
 # specifcally the A500 F500 E500 A500 D700 E700 F700 series - others may work or need adjustment
@@ -341,7 +341,7 @@ in this case pins such as up-to-speed, amps, alarm and status bits are not usefu
         --port is optional as it defaults to ttyS0'''
         print
         print ''' Sample linuxcnc code
-loadusr -Wn coolant mitsub_vfd.py spindle=02 coolant=01
+loadusr -Wn coolant mitsub_vfd spindle=02 coolant=01
 # **************** Spindle VFD setup slave 2 *********************
 net spindle-vel-cmd               spindle.motor-cmd
 net spindle-cw                    spindle.fwd              

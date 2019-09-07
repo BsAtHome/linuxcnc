@@ -46,7 +46,7 @@ static emcmot_debug_t *emcmotDebug = 0;
 static emcmot_error_t *emcmotError = 0;
 static emcmot_struct_t *emcmotStruct = 0;
 
-/* usrmotIniLoad() loads params (SHMEM_KEY, COMM_TIMEOUT, COMM_WAIT)
+/* usrmotIniLoad() loads params (SHMEM_KEY, COMM_TIMEOUT)
    from named ini file */
 int usrmotIniLoad(const char *filename)
 {
@@ -61,7 +61,6 @@ int usrmotIniLoad(const char *filename)
     try {
         inifile.Find((int *)&SHMEM_KEY, "SHMEM_KEY", "EMCMOT");
         inifile.Find(&EMCMOT_COMM_TIMEOUT, "COMM_TIMEOUT", "EMCMOT");
-        inifile.Find(&EMCMOT_COMM_WAIT, "COMM_WAIT", "EMCMOT");
     }
 
     catch(IniFile::Exception &e){
@@ -508,15 +507,6 @@ void usrmotPrintEmcmotStatus(emcmot_status_t *s, int which)
 	printf("active depth: \t%d\n", s->activeDepth);
 	printf("inpos:        \t%d\n",
 	    s->motionFlag & EMCMOT_MOTION_INPOS_BIT ? 1 : 0);
-/*! \todo Another #if 0 */
-#if 0				/*! \todo FIXME - change to work with joint
-				   structures */
-	printf("vscales:      \tQ: %.2f", s->qVscale);
-	for (t = 0; t < EMCMOT_MAX_JOINTS; t++) {
-	    printf("\t%d: %.2f", t, s->axVscale[t]);
-	}
-	printf("\n");
-#endif
 /*! \todo Another #if 0 */
 #if 0				/*! \todo FIXME - change to work with joint
 				   structures */

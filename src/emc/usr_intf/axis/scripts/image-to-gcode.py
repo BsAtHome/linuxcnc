@@ -8,8 +8,8 @@
 ## warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
 ## the GNU General Public License for more details.  You should have
 ## received a copy of the GNU General Public License along with image-to-gcode;
-## if not, write to the Free Software Foundation, Inc., 59 Temple Place,
-## Suite 330, Boston, MA 02111-1307 USA
+## if not, write to the Free Software Foundation, Inc., 51 Franklin Street,
+## Fifth Floor, Boston, MA 02110-1301 USA.
 ## 
 ## image-to-gcode.py is Copyright (C) 2005 Chris Radek
 ## chris@timeguy.com
@@ -23,7 +23,10 @@ sys.path.insert(0, os.path.join(BASE, "lib", "python"))
 import gettext;
 gettext.install("linuxcnc", localedir=os.path.join(BASE, "share", "locale"), unicode=True)
 
-import Image
+try:
+    from PIL import Image
+except ImportError:
+    import Image
 
 import numpy.core
 plus_inf = numpy.core.Inf
@@ -35,6 +38,10 @@ from math import *
 import operator
 
 epsilon = 1e-5
+
+def tobytes(img):
+    if hasattr(img, 'tobytes'): return img.tobytes()
+    return img.tostring()
 
 def ball_tool(r,rad):
     s = -sqrt(rad**2-r**2)
@@ -488,7 +495,12 @@ class ArcEntryCut:
 
 def ui(im, nim, im_name):
     import Tkinter
-    import ImageTk
+    
+    try:
+        from PIL import ImageTk
+    except ImportError:    
+        import ImageTk
+
     import pickle
     import nf
 
@@ -753,7 +765,7 @@ def main():
     im = im.convert("L") #grayscale
     w, h = im.size
 
-    nim = numpy.fromstring(im.tostring(), dtype=numpy.uint8).reshape((h, w)).astype(numpy.float32)
+    nim = numpy.fromstring(tobytes(im), dtype=numpy.uint8).reshape((h, w)).astype(numpy.float32)
     options = ui(im, nim, im_name)
 
     step = options['pixelstep']

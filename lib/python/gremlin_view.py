@@ -16,7 +16,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #------------------------------------------------------------------------------
 
 """gremlin_view
@@ -309,6 +309,7 @@ class GremlinView():
                                    os.path.getmtime(self.last_file))
 
         self.ct = 0
+        if self.parent is None: self.topwindow.deiconify()
         self._periodic('BEGIN')
         gobject.timeout_add_seconds(g_periodic_secs,self._periodic,'Continue')
         # or use gobject.timeout_add() interval units in mS
@@ -317,9 +318,6 @@ class GremlinView():
         # print "_periodic:",self.ct,arg
         self.ct +=1
         self.halg.poll()
-
-        if self.parent is None:
-            self.topwindow.deiconify()
 
         if (self.parent is not None) and (self.ct) == 2:
             # not sure why delay is needed for reparenting

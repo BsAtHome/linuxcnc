@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program; if not, write to the Free Software
-#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 from rs274 import Translated, ArcsToSegmentsMixin, OpenGLTk
 from minigl import *
@@ -24,6 +24,7 @@ import linuxcnc
 import array
 import gcode
 import os
+import re
 
 def minmax(*args):
     return min(*args), max(*args)
@@ -423,24 +424,28 @@ class GlCanonDraw:
         self.trajcoordinates = "unknown"
         self.dro_in = "% 9.4f"
         self.dro_mm = "% 9.3f"
-        if os.environ["INI_FILE_NAME"]:
-            self.inifile = linuxcnc.ini(os.environ["INI_FILE_NAME"])
-            if self.inifile.find("DISPLAY", "DRO_FORMAT_IN"):
-                temp = self.inifile.find("DISPLAY", "DRO_FORMAT_IN")
-                try:
-                    test = temp % 1.234
-                except:
-                    print "Error: invalid [DISPLAY] DRO_FORMAT_IN in INI file"
-                else:
-                    self.dro_in = temp
-            if self.inifile.find("DISPLAY", "DRO_FORMAT_MM"):
-                temp = self.inifile.find("DISPLAY", "DRO_FORMAT_MM")
-                try:
-                    test = temp % 1.234
-                except:
-                    print "Error: invalid [DISPLAY] DRO_FORMAT_MM in INI file"
-                else:
-                    self.dro_mm = temp
+        self.show_overlay = True
+        try:
+            if os.environ["INI_FILE_NAME"]:
+                self.inifile = linuxcnc.ini(os.environ["INI_FILE_NAME"])
+                if self.inifile.find("DISPLAY", "DRO_FORMAT_IN"):
+                    temp = self.inifile.find("DISPLAY", "DRO_FORMAT_IN")
+                    try:
+                        test = temp % 1.234
+                    except:
+                        print "Error: invalid [DISPLAY] DRO_FORMAT_IN in INI file"
+                    else:
+                        self.dro_in = temp
+                if self.inifile.find("DISPLAY", "DRO_FORMAT_MM"):
+                    temp = self.inifile.find("DISPLAY", "DRO_FORMAT_MM")
+                    try:
+                        test = temp % 1.234
+                    except:
+                        print "Error: invalid [DISPLAY] DRO_FORMAT_MM in INI file"
+                    else:
+                        self.dro_mm = temp
+        except:
+            pass
 
     def init_glcanondraw(self,trajcoordinates="XYZABCUVW",kinsmodule="trivkins",msg=""):
         self.trajcoordinates = trajcoordinates.upper().replace(" ","")
@@ -1086,7 +1091,10 @@ class GlCanonDraw:
 
             if self.get_show_extents():
                 self.show_extents()
-
+        try:
+            self.user_plot()
+        except:
+            pass
         if self.get_show_live_plot() or self.get_show_program():
     
             alist = self.dlist(('axes', self.get_view()), gen=self.draw_axes)
@@ -1258,7 +1266,10 @@ class GlCanonDraw:
                 glPushMatrix()
                 glTranslatef(*pos)
                 sign = 1
-                for ch in self.get_geometry():
+                g = re.split(" *(-?[XYZABCUVW])", self.get_geometry())
+                g = "".join(reversed(g))
+
+                for ch in g: # Apply in orignal non-reversed GEOMETRY order
                     if ch == '-':
                         sign = -1
                     elif ch == 'A':
@@ -1270,6 +1281,8 @@ class GlCanonDraw:
                     elif ch == 'C':
                         glRotatef(rz*sign, 0, 0, 1)
                         sign = 1
+                    else:
+                        sign = 1 # reset sign for non-rotational axis "XYZUVW"
                 glEnable(GL_BLEND)
                 glEnable(GL_CULL_FACE)
                 glBlendFunc(GL_ONE, GL_CONSTANT_ALPHA)
@@ -1304,6 +1317,7 @@ class GlCanonDraw:
         ypos = self.winfo_height()
         glOrtho(0.0, self.winfo_width(), 0.0, ypos, -1.0, 1.0)
         glMatrixMode(GL_MODELVIEW)
+
         glPushMatrix()
         glLoadIdentity()
 
@@ -1314,19 +1328,20 @@ class GlCanonDraw:
         maxlen = max([len(p) for p in posstrs])
         pixel_width = charwidth * max(len(p) for p in posstrs)
 
-        glDepthFunc(GL_ALWAYS)
-        glDepthMask(GL_FALSE)
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_ONE, GL_CONSTANT_ALPHA)
-        glColor3f(*self.colors['overlay_background'])
-        glBlendColor(0,0,0,1-self.colors['overlay_alpha'])
-        glBegin(GL_QUADS)
-        glVertex3f(0, ypos, 1)
-        glVertex3f(0, ypos - 8 - linespace*len(posstrs), 1)
-        glVertex3f(pixel_width+42, ypos - 8 - linespace*len(posstrs), 1)
-        glVertex3f(pixel_width+42, ypos, 1)
-        glEnd()
-        glDisable(GL_BLEND)
+        if self.show_overlay:
+            glDepthFunc(GL_ALWAYS)
+            glDepthMask(GL_FALSE)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_CONSTANT_ALPHA)
+            glColor3f(*self.colors['overlay_background'])
+            glBlendColor(0,0,0,1-self.colors['overlay_alpha'])
+            glBegin(GL_QUADS)
+            glVertex3f(0, ypos, 1)
+            glVertex3f(0, ypos - 8 - linespace*len(posstrs), 1)
+            glVertex3f(pixel_width+42, ypos - 8 - linespace*len(posstrs), 1)
+            glVertex3f(pixel_width+42, ypos, 1)
+            glEnd()
+            glDisable(GL_BLEND)
 
         maxlen = 0
         ypos -= linespace+5
@@ -1450,8 +1465,11 @@ class GlCanonDraw:
         if "trivkins" in kinsmodule:
             return trajcoordinates.index(aletter)
         else:
-            guess = trajcoordinates.index(aletter)
-            return guess
+            try:
+                guess = trajcoordinates.index(aletter)
+                return guess
+            except:
+                return "XYZABCUVW".index(aletter)
 
     def posstrs(self):
 
@@ -1476,6 +1494,8 @@ class GlCanonDraw:
                 positions[0] = x * math.cos(t) - y * math.sin(t)
                 positions[1] = x * math.sin(t) + y * math.cos(t)
                 positions = [(i-j) for i, j in zip(positions, s.g92_offset)]
+            else:
+                positions = list(positions)
 
             if self.get_a_axis_wrapped():
                 positions[3] = math.fmod(positions[3], 360.0)
@@ -1567,6 +1587,7 @@ class GlCanonDraw:
 
             if self.get_show_machine_speed():
                 posstrs.append(format % ("Vel", spd))
+                droposstrs.append(diaformat % ("Vel", spd))
 
             if self.get_show_distance_to_go():
                 posstrs.append(format % ("DTG", dtg))
@@ -1707,7 +1728,7 @@ class GlCanonDraw:
         glDepthFunc(GL_ALWAYS)
         diameter, frontangle, backangle, orientation = current_tool[-4:]
         w = 3/8.
-
+        glDisable(GL_CULL_FACE)#lathe tool needs to be visable form both sides
         radius = self.to_internal_linear_unit(diameter) / 2.
         glColor3f(*self.colors['lathetool'])
         glBegin(GL_LINES)
@@ -1762,6 +1783,7 @@ class GlCanonDraw:
                 radius * dy + radius * math.cos(circlemaxangle) + sz * cosmax)
 
             glEnd()
+        glEnable(GL_CULL_FACE)
         glDepthFunc(GL_LESS)
 
     def extents_info(self):

@@ -20,7 +20,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #-----------------------------------------------------------------------
 
 
@@ -789,14 +789,14 @@ proc usage {} {
   puts "  --base      nS   (base  thread interval, default:   $::LH(base,period,ns), min:  $::LH(base,period,ns,min))"
   puts "  --servo     nS   (servo thread interval, default: $::LH(servo,period,ns), min: $::LH(servo,period,ns,min))"
 
-  puts "  --bbinsize  nS   (base  bin size,  default: $::LH(base,binsize,ns)"
-  puts "  --sbinsize  nS   (servo bin size, default: $::LH(servo,binsize,ns)"
+  puts "  --bbinsize  nS   (base  bin size,  default: $::LH(base,binsize,ns))"
+  puts "  --sbinsize  nS   (servo bin size, default: $::LH(servo,binsize,ns))"
 
-  puts "  --bbins     n    (base  bins, default: $::LH(base,maxbins)"
-  puts "  --sbins     n    (servo bins, default: $::LH(servo,maxbins)"
+  puts "  --bbins     n    (base  bins, default: $::LH(base,maxbins))"
+  puts "  --sbins     n    (servo bins, default: $::LH(servo,maxbins))"
 
   puts "  --logscale  0|1  (y axis log scale, default: $::LH(y,logscale))"
-  puts "  --text      note (additional note, default: \"$::LH(note,txt)\" )"
+  puts "  --text      note (additional note, default: \"$::LH(note,txt)\")"
   puts "  --show           (show count of undisplayed bins)"
   puts "  --nobase         (servo thread only)"
   puts "  --verbose        (progress and debug)"
