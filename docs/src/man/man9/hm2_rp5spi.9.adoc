@@ -42,7 +42,12 @@ ____
   pin-number in parentheses): - SPI0: MOSI=10(19), MISO=9(21),
   SCLK=11(23), CE0=8(24), CE1=7(26) - SPI1: MOSI=20(38), MISO=19(35),
   SCLK=21(40), CE0=18(12), CE1=17(11), CE2=16(36).
-
+*spi_noqueue* [default: 0 (off)]::
+  Force disable queued command processing. Normally, all requests are
+  queued if requested by upstream and sent in one bulk transfer. This
+  reduces overhead significantly by up to 35%. Disabling the queue makes
+  each transfer visible and more easily debug-able. Set to any non-zero
+  value to disable the queue.
 *spi_debug* [default: -1]::
   Set the message level of the running process. The message level is set
   if *spi_debug* is set to a positive value between 0 and 5, where 0
@@ -60,7 +65,7 @@ Mesa's SPI based Anything I/O boards with SPI enabled HostMot2 firmware
 to the LinuxCNC HAL. This driver is not based on the linux spidev
 driver, but on a dedicated RP1 SPI hardware interface driver.
 
-The supported boards are: 7I90HD, 7C80 and 7C81.
+The supported boards are: 7I90HD, 7I43, 7C80 and 7C81.
 
 The board must have a compatible firmware (like: 7i90_spi_*-bit,
 7c80_*.bit and 7c81_*.bit) loaded on the board by the *mesaflash*(1)
@@ -70,11 +75,11 @@ hm2_rp5spi is only available when LinuxCNC is configured with "uspace"
 realtime. It works with Raspian and PREEMPT_RT kernel.
 
 It is *strongly* recommended that you unload/disable the kernel's SPI
-drivers *dw_spi* and *dw_spi_mmio* by disabling SPI using the
-*raspi-config* program's "Interface Options" configuration. The
-hm2_rp5spi driver attempts to unload the kernel driver at startup and
-restore it at exit if loaded at startup. However, there are no
-guarantees about the effectiveness of the module unload/load actions. +
+drivers *dw_spi* and *dw_spi_mmio* (on Raspbian use the *raspi-config*
+program's "Interface Options" configuration). The hm2_rp5spi driver
+attempts to unload the kernel driver at startup and restore it at exit
+if loaded at startup. However, there are no guarantees about the
+effectiveness of the module unload/load actions. +
 Please note that having both kernel and user-space SPI drivers installed
 can result in unexpected interactions and system instabilities.
 

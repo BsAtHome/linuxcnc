@@ -204,6 +204,14 @@ static int spi_probe = SPI0_PROBE_CE0;
 RTAPI_MP_INT(spi_probe, "Bit-field to select which SPI/CE combinations to probe (default 1 (SPI0/CE0))")
 
 /*
+ * Normally, all requests are queued if requested by upstream and sent in one
+ * bulk transfer. This reduces overhead significantly. Disabling the queue make
+ * each transfer visible and more easily debugable.
+ */
+static int spi_noqueue = 0;
+RTAPI_MP_INT(spi_noqueue, "Disable queued SPI requests, use for debugging only (default 0 (off))")
+
+/*
  * Set the message level for debugging purpose. This has the (side-)effect that
  * all modules within this process will start spitting out messages at the
  * requested level.
@@ -345,7 +353,7 @@ static inline void spi_reset(dw_ssi_t *port)
  * Transfer a buffer of words to the SPI port and fill the same buffer with the
  * data coming from the SPI port.
  */
-static int spi_transfer(hm2_rp5spi_t *hm2, uint32_t *wptr, size_t txlen)
+static int spi_transfer(hm2_rp5spi_t *hm2, uint32_t *wptr, size_t txlen, int rw)
 {
 	dw_ssi_t *port = hm2->port;
 	size_t rxlen = txlen;			// words to receive
@@ -360,7 +368,7 @@ static int spi_transfer(hm2_rp5spi_t *hm2, uint32_t *wptr, size_t txlen)
 	// Setup transfer
 	// 32-bit, transmit/receive transfers, SPI mode 0 (CPHA=0, CPOL=0)
 	reg_wr(&port->ctrlr0, DW_SSI_CTRLR0_DFS_32(32-1) | DW_SSI_CTRLR0_TMOD(DW_SSI_CTRLR0_TMOD_TXRX));
-	reg_wr_raw(&port->baudr, hm2->clkdivr);
+	reg_wr_raw(&port->baudr, rw ? hm2->clkdivr : hm2->clkdivw);
 	reg_wr_raw(&port->ser, hm2->cemask);
 
 	reg_wr_raw(&port->ssienr, DW_SSI_SSIENR_SSI_EN);	// Enable port
@@ -373,12 +381,15 @@ static int spi_transfer(hm2_rp5spi_t *hm2, uint32_t *wptr, size_t txlen)
 		fifo--;
 	}
 
-	wmb();	// Ensure all writes before reading
+	// We don't need to add a memory barrier. The next loop runs about rxlen
+	// and the code will stall on the register reads. There is no read/write
+	// overlap that may be problematic.
 
 	while(rxlen > 0) {
 		// Get the rx fifo level and read as many as available
-		uint32_t tff;
-		tff = fifo = reg_rd_raw(&port->rxflr);
+		uint32_t tff = fifo = reg_rd_raw(&port->rxflr);
+		// Already get the int status register; this read will pipeline
+		uint32_t risr = reg_rd_raw(&port->risr);
 		while(rxlen > 0 && fifo > 0) {
 			*rptr = reg_rd_raw(&port->dr0);
 			rptr++;
@@ -398,7 +409,7 @@ static int spi_transfer(hm2_rp5spi_t *hm2, uint32_t *wptr, size_t txlen)
 		}
 
 		// Check for receive errors
-		if(reg_rd_raw(&port->risr) & (DW_SSI_RISR_RXOIR)) {
+		if(risr & (DW_SSI_RISR_RXOIR)) {
 			// The receive fifo overflowed. A bad sign...
 			// Abort the transfer
 			rv = -EIO;
@@ -438,7 +449,7 @@ static int hm2_rp5spi_write(hm2_lowlevel_io_t *llio, rtapi_u32 addr, const void 
 
 	txbuf[0] = mk_write_cmd(addr, txlen, true);	// Setup write command
 	memcpy(&txbuf[1], buffer, size);			// Setup write data
-	return spi_transfer(hm2, txbuf, txlen + 1);	// Do transfer
+	return spi_transfer(hm2, txbuf, txlen + 1, 0);	// Do transfer
 }
 
 /*
@@ -461,7 +472,7 @@ static int hm2_rp5spi_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *buffer
 
 	memset(rxbuf, 0, sizeof(rxbuf));			// Clear buffer; reads stuff zero writes
 	rxbuf[0] = mk_read_cmd(addr, rxlen, true);	// Setup read command
-	rv = spi_transfer(hm2, rxbuf, rxlen + 1);	// Do transfer
+	rv = spi_transfer(hm2, rxbuf, rxlen + 1, 1);	// Do transfer
 	memcpy(buffer, &rxbuf[1], size);			// Copy received data (even with errors...)
 	return rv;
 }
@@ -506,7 +517,7 @@ static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *
 static int hm2_rp5spi_send_queued_reads(hm2_lowlevel_io_t *llio)
 {
 	hm2_rp5spi_t *hm2 = (hm2_rp5spi_t *)llio;
-	int rv = spi_transfer(hm2, hm2->rbuf.ptr, hm2->rbuf.n);
+	int rv = spi_transfer(hm2, hm2->rbuf.ptr, hm2->rbuf.n, 1);
 	if(rv >= 0) {
 		// The transfer read the data into the read buffer. Now copy it into
 		// the individual read requests' buffers.
@@ -557,7 +568,7 @@ static int hm2_rp5spi_queue_write(hm2_lowlevel_io_t *llio, rtapi_u32 addr, const
 static int hm2_rp5spi_send_queued_writes(hm2_lowlevel_io_t *llio)
 {
 	hm2_rp5spi_t *hm2 = (hm2_rp5spi_t *)llio;
-	int rv = spi_transfer(hm2, hm2->wbuf.ptr, hm2->wbuf.n);
+	int rv = spi_transfer(hm2, hm2->wbuf.ptr, hm2->wbuf.n, 0);
 	hm2->wbuf.n = 0;	// Reset the queue buffer
 	return rv;
 }
@@ -1035,12 +1046,14 @@ static int hm2_rp5spi_setup(void)
 
 		LL_INFO("SPI%d/CE%d\n", iddev, idce);
 		boards[j].llio.read  = hm2_rp5spi_read;
-		boards[j].llio.queue_read  = hm2_rp5spi_queue_read;
-		boards[j].llio.send_queued_reads  = hm2_rp5spi_send_queued_reads;
-		boards[j].llio.receive_queued_reads  = hm2_rp5spi_receive_queued_reads;
 		boards[j].llio.write = hm2_rp5spi_write;
-		boards[j].llio.queue_write  = hm2_rp5spi_queue_write;
-		boards[j].llio.send_queued_writes  = hm2_rp5spi_send_queued_writes;
+		if(!spi_noqueue) {
+			boards[j].llio.queue_read  = hm2_rp5spi_queue_read;
+			boards[j].llio.send_queued_reads  = hm2_rp5spi_send_queued_reads;
+			boards[j].llio.receive_queued_reads  = hm2_rp5spi_receive_queued_reads;
+			boards[j].llio.queue_write  = hm2_rp5spi_queue_write;
+			boards[j].llio.send_queued_writes  = hm2_rp5spi_send_queued_writes;
+		}
 		LL_INFO("SPI%d/CE%d write clock rate calculated: %d Hz (clkdiv=%u)\n", iddev, idce, RP1_SPI_CLK / boards[j].clkdivw, boards[j].clkdivw);
 		LL_INFO("SPI%d/CE%d read clock rate calculated: %d Hz (clkdiv=%u)\n",  iddev, idce, RP1_SPI_CLK / boards[j].clkdivr, boards[j].clkdivr);
 
