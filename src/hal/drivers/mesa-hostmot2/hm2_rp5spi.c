@@ -262,13 +262,13 @@ RPSPI_ALWAYS_INLINE static inline void reg_wr_raw(const volatile void *addr, uin
 RPSPI_ALWAYS_INLINE static inline void gpio_set(int pin)
 {
 	if(pin >= 0 && pin < 28)
-		reg_wr(&rio0->set.out, 1 << pin);
+		reg_wr_raw(&rio0->set.out, 1 << pin);
 }
 
 RPSPI_ALWAYS_INLINE static inline void gpio_clr(int pin)
 {
 	if(pin >= 0 && pin < 28)
-		reg_wr(&rio0->clr.out, 1 << pin);
+		reg_wr_raw(&rio0->clr.out, 1 << pin);
 }
 #else
 RPSPI_ALWAYS_INLINE static inline void gpio_set(int pin) { (void)pin; }
@@ -722,7 +722,7 @@ static int peripheral_map(uintptr_t membase, size_t memsize)
 
 	// Calculate the addresses of the individual peripherals
 	spi0 = (dw_ssi_t *)((void *)((uintptr_t)peripheralmem + RP1_SPI0_OFFSET));
-	spi1 = (dw_ssi_t *)((void *)((uintptr_t)peripheralmem + RP1_SPI0_OFFSET));
+	spi1 = (dw_ssi_t *)((void *)((uintptr_t)peripheralmem + RP1_SPI1_OFFSET));
 	iobank0 = (rp1_io_bank0_t *)((void *)((uintptr_t)peripheralmem + RP1_IO_BANK0_OFFSET));
 	padsbank0 = (rp1_pads_bank0_t *)((void *)((uintptr_t)peripheralmem + RP1_PADS_BANK0_OFFSET));
 	rio0 = (rp1_rio_t *)((void *)((uintptr_t)peripheralmem + RP1_SYS_RIO0_OFFSET));
