@@ -501,10 +501,11 @@ static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *
 		return -ENOMEM;
 	}
 
-	rxref_t *ref = (rxref_t *)hm2->rref.ptr;
+	rxref_t *ref = &((rxref_t *)hm2->rref.ptr)[hm2->rref.n];
 	ref->ptr = buffer;
 	ref->size = size;
 	ref->idx = hm2->rbuf.n + 1;	// offset 0 is command, 1 is data
+	hm2->rref.n += 1;
 
 	uint32_t *rbptr = (uint32_t *)hm2->rbuf.ptr;
 	rbptr[hm2->rbuf.n] = mk_read_cmd(addr, rxlen, true);			// The read command
@@ -940,8 +941,8 @@ static int hm2_rp5spi_setup(void)
 	int i, j;
 	int retval = -1;
 	char buf[256];
-	const char *soc;
 	ssize_t buflen;
+	char *cptr;
 
 	// Set process-level message level if requested
 	if(spi_debug >= RTAPI_MSG_NONE && spi_debug <= RTAPI_MSG_ALL)
@@ -952,16 +953,37 @@ static int hm2_rp5spi_setup(void)
 	//  https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#check-raspberry-pi-model-and-cpu-across-distributions
 	//
 	// Reading /proc/device-tree/compatible should contain the relevant
-	// information.  We should get a buffer containing:
+	// information. We should get a buffer containing a stringlist:
 	//   "raspberrypi,5-model-b\0brcm,bcm2712\0"
 	// And yes, it has embedded NULs.
 	//
-#define RPI_MODEL_BRAND		"raspberrypi"
-#define RPI_MODEL_TYPE_5B	"5-model-b"
-#define RPI_MODEL_5B		RPI_MODEL_BRAND "," RPI_MODEL_TYPE_5B
-#define RPI_SOC_TYPE		"brcm"
-#define RPI_SOC_ID			"bcm2712"
-#define RPI_SOC				RPI_SOC_TYPE "," RPI_SOC_ID
+#define DTC_BOARD_MAKE_RPI		"raspberrypi"
+#define DTC_BOARD_MODEL_5B		"5-model-b"
+#define DTC_BOARD_MODEL_4CM		"4-compute-module"
+#define DTC_BOARD_MODEL_4B		"4-model-b"
+#define DTC_BOARD_MODEL_3CM		"3-compute-module"
+#define DTC_BOARD_MODEL_3BP		"3-model-b-plus"
+#define DTC_BOARD_MODEL_3AP		"3-model-a-plus"
+#define DTC_BOARD_MODEL_3B		"3-model-b"
+#define DTC_BOARD_MODEL_2B		"2-model-b"
+#define DTC_BOARD_MODEL_CM		"compute-module"
+#define DTC_BOARD_MODEL_BP		"model-b-plus"
+#define DTC_BOARD_MODEL_AP		"model-a-plus"
+#define DTC_BOARD_MODEL_BR2		"model-b-rev2"
+#define DTC_BOARD_MODEL_B		"model-b"
+#define DTC_BOARD_MODEL_A		"model-a"
+#define DTC_BOARD_MODEL_ZERO_2W	"model-zero-2-w"
+#define DTC_BOARD_MODEL_ZERO_W	"model-zero-w"
+#define DTC_BOARD_MODEL_ZERO	"model-zero"
+
+#define DTC_SOC_MAKE_BRCM		"brcm"
+#define DTC_SOC_MODEL_BCM2712	"bcm2712"
+#define DTC_SOC_MODEL_BCM2711	"bcm2711"
+#define DTC_SOC_MODEL_BCM2837	"bcm2837"
+#define DTC_SOC_MODEL_BCM2836	"bcm2836"
+#define DTC_SOC_MODEL_BCM2835	"bcm2835"
+
+#define RPI_MODEL_5B		DTC_BOARD_MAKE_RPI "," DTC_BOARD_MODEL_5B
 
 	buflen = read_file("/proc/device-tree/compatible", buf, sizeof(buf));
 	if(buflen <= 0) {
@@ -969,23 +991,27 @@ static int hm2_rp5spi_setup(void)
 		return -1;
 	}
 
-	// The buffer is always NUL terminated in read_file(). We strlen the first
-	// string (the model), skip the NUL and see if there is room for the second
-	// string (the soc).
-	i = strlen(buf) + 1;	// Offset to second string (the soc) in buffer
-	if(i >= sizeof(buf)-1) {
-		LL_ERR("Platform identity format in /proc/device-tree/compatible unrecognised. Buffer too small?");
+	// Check each string in the stringlist and test for our compatibility
+	// string. Don't go beyond the buffer's size.
+	for(cptr = buf; cptr;) {
+		// The "Raspberry Pi 5 Model B" is currently the only one supported by
+		// this driver.
+		if(!strcmp(cptr, RPI_MODEL_5B)) {
+			break;	// Found our board
+		}
+		j = strlen(cptr);
+		if((cptr - buf) + j + 1 < buflen)
+			cptr += j + 1;
+		else
+			cptr = NULL;
+	}
+
+	if(!cptr) {
+		LL_ERR("Unsupported platform: '%s'\n", buf);
 		return -1;
 	}
-	soc = buf + i;
 
-	// The "Raspberry Pi 5 Model B" is currently the only one supported by this driver.
-	if(strcmp(buf, RPI_MODEL_5B) || strcmp(soc, RPI_SOC)) {
-		LL_ERR("Unsupported platform: '%s', '%s'\n", buf, soc);
-		return -1;
-	}
-
-	LL_INFO("Platform identity: %s %s\n", buf, soc);
+	LL_INFO("Platform identity: %s\n", buf);
 	// Human readable platform name
 	if(read_file("/proc/device-tree/model", buf, sizeof(buf)) > 0)
 		LL_INFO("Platform: %s\n", buf);
