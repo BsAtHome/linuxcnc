@@ -140,6 +140,16 @@ static dw_ssi_t *spi1;				// SPI1 peripheral structure in mmap'ed address space
 static hm2_rp5spi_t boards[RPSPI_MAX_BOARDS];	// Connected boards
 static int comp_id;				// Upstream assigned component ID
 
+// The value of the cookie when read from the board. An actual cookie read
+// consists of four words. The fourth value is the idrom address, which may
+// vary per board.
+static const uint32_t iocookie[3] = {
+	HM2_IOCOOKIE,
+	// The following words spell HOSTMOT2
+	0x54534f48,	// TSOH
+	0x32544f4d	// 2TOM
+};
+
 /*
  * Configuration parameters
  */
@@ -501,6 +511,8 @@ static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *
 		return -ENOMEM;
 	}
 
+	// Add a reference control structure to remember where the data will be put
+	// after the read is executed
 	rxref_t *ref = &((rxref_t *)hm2->rref.ptr)[hm2->rref.n];
 	ref->ptr = buffer;
 	ref->size = size;
@@ -515,10 +527,21 @@ static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *
 	return 1;
 }
 
+/*
+ * HM2 interface: Send queued reads
+ * Performs a SPI transfer of all collected read requests in one burst and
+ * copies back the data received in the individual buffers.
+ */
 static int hm2_rp5spi_send_queued_reads(hm2_lowlevel_io_t *llio)
 {
+	uint32_t cookie[4] = {0, 0, 0, 0};
 	hm2_rp5spi_t *hm2 = (hm2_rp5spi_t *)llio;
-	int rv = spi_transfer(hm2, hm2->rbuf.ptr, hm2->rbuf.n, 1);
+	int rv;
+
+	// Add a cookie read at the end of the queued reads to verify comms
+	hm2_rp5spi_queue_read(llio, HM2_ADDR_IOCOOKIE, cookie, sizeof(cookie));
+
+	rv = spi_transfer(hm2, hm2->rbuf.ptr, hm2->rbuf.n, 1);
 	if(rv >= 0) {
 		// The transfer read the data into the read buffer. Now copy it into
 		// the individual read requests' buffers.
@@ -527,16 +550,26 @@ static int hm2_rp5spi_send_queued_reads(hm2_lowlevel_io_t *llio)
 			rxref_t *rxref = &((rxref_t *)hm2->rref.ptr)[i];
 			memcpy(rxref->ptr, &((uint32_t *)hm2->rbuf.ptr)[rxref->idx], rxref->size);
 		}
+
+		// Check the cookie read. Its an IO error if it does not match
+		if(memcmp(cookie, iocookie, sizeof(iocookie)))
+			rv = -EIO;
 	}
 	hm2->rbuf.n = 0;	// Reset the queue buffers
 	hm2->rref.n = 0;
+
 	return rv;
 }
 
+/*
+ * HM2 interface: Receive queued reads
+ * This is a no-op in SPI. The data was already received when the transfer was
+ * performed in hm2_rp5spi_send_queued_reads() above. The data was copied to
+ * the requester(s) immediately after the transfer.
+ */
 static int hm2_rp5spi_receive_queued_reads(hm2_lowlevel_io_t *llio)
 {
 	(void)llio;
-	/* The data was already received while doing the SPI transfer */
 	return 1;
 }
 
@@ -566,6 +599,10 @@ static int hm2_rp5spi_queue_write(hm2_lowlevel_io_t *llio, rtapi_u32 addr, const
 	return 1;
 }
 
+/*
+ * HM2 interface: Send queued writes
+ * Performs a SPI transfer of all collected write requests in one burst.
+ */
 static int hm2_rp5spi_send_queued_writes(hm2_lowlevel_io_t *llio)
 {
 	hm2_rp5spi_t *hm2 = (hm2_rp5spi_t *)llio;
@@ -595,12 +632,6 @@ static inline unsigned count_ones(uint32_t val)
 
 static int32_t check_cookie(hm2_rp5spi_t *board)
 {
-	// The secondary and tertiary cookie values are "HOSTMOT2", but we use
-	// binary here to prevent bytesex problems and multibyte character
-	// formats. Alternatively, we could use a byte-array, but then the
-	// IOCOOKIE values has to be split. Doomed if you do, doomed if you
-	// don't...
-	static const uint32_t xcookie[3] = {HM2_IOCOOKIE, 0x54534f48, 0x32544f4d};
 	uint32_t cookie[4] = {0, 0, 0, 0};
 	uint32_t ca;
 	uint32_t co;
@@ -608,10 +639,10 @@ static int32_t check_cookie(hm2_rp5spi_t *board)
 	// We read four (4) 32-bit words. The first three are the cookie and
 	// the fourth entry is the idrom address offset. The offset is used in
 	// the call to get the idrom if we successfully match a cookie.
-	if(!board->llio.read(&board->llio, HM2_ADDR_IOCOOKIE, cookie, 16))
+	if(!board->llio.read(&board->llio, HM2_ADDR_IOCOOKIE, cookie, sizeof(cookie)))
 		return -ENODEV;
 
-	if(!memcmp(cookie, xcookie, sizeof(xcookie))) {
+	if(!memcmp(cookie, iocookie, sizeof(iocookie))) {
 		LL_INFO("Cookie read: %08x %08x %08x, idrom@%08x\n", cookie[0], cookie[1], cookie[2], cookie[3]);
 		return (int32_t)cookie[3];	// The cookie got read correctly
 	}
@@ -620,7 +651,7 @@ static int32_t check_cookie(hm2_rp5spi_t *board)
 			" expected: %08x %08x %08x\n",
 			board->spidevid, board->spiceid,
 			cookie[0], cookie[1], cookie[2],
-			xcookie[0], xcookie[1], xcookie[2]);
+			iocookie[0], iocookie[1], iocookie[2]);
 
 	// Lets see if we can tell why it went wrong
 	ca = cookie[0] & cookie[1] & cookie[2];	// All ones -> ca == ones
@@ -647,7 +678,7 @@ static int32_t check_cookie(hm2_rp5spi_t *board)
 		unsigned ones;
 		unsigned i;
 		for(ones = i = 0; i < 3; i++) {
-			ones += count_ones((xcookie[i] ^ (cookie[i] << 1)) & ~0x00000001);
+			ones += count_ones((iocookie[i] ^ (cookie[i] << 1)) & ~0x00000001);
 		}
 		if(!ones) {
 			// No ones in the XOR result -> the cookie is probably bit-shifted
