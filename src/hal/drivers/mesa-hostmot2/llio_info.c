@@ -227,7 +227,7 @@ const char *set_llio_info_spi(hm2_lowlevel_io_t *llio, const hm2_idrom_t *idrom)
 	/* In the far future, when there are too many boards, use bsearch */
 	/* With few boards, linear search is faster */
 	for(i = 0; i < NELEM(spiboards); i++) {
-		if(!memcmp(idrom->board_name, spiboards[i].board_name, 8)) {
+		if(!memcmp(idrom->board_name, spiboards[i].board_name, sizeof(idrom->board_name))) {
 			llio->num_ioport_connectors = spiboards[i].num_ioport_connectors;
 			llio->pins_per_connector = spiboards[i].pins_per_connector;
 			for(j = 0; j < ANYIO_MAX_IOPORT_CONNECTORS; j++)
