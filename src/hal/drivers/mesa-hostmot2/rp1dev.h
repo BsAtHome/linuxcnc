@@ -133,9 +133,6 @@ typedef struct __rp1_rio_t {
 #define RP1_FSEL_SYS_RIO			5	/* Pin as GPIO */
 #define RP1_FSEL_ALT0				0	/* The RPi default alternate assignments */
 
-#define GPIO_FSEL_X_GPIO_INPUT		0	/* All pin's function 0 is input */
-#define GPIO_FSEL_X_GPIO_OUTPUT		1	/* All pin's function 1 is output */
-
 typedef struct __rp1_gpio_stat_ctrl_t {
 	__I  uint32_t	status;		/* GPIO status */
 	__IO uint32_t	ctrl;		/* GPIO control */
