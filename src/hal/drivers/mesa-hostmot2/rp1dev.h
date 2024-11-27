@@ -18,6 +18,9 @@
 
 #ifndef HAL_HM2_RP1DEV_H
 #define HAL_HM2_RP1DEV_H
+
+#include "hwregaccess.h"
+
 /*
  * RP1 peripheral description see:
  * - https://datasheets.raspberrypi.com/rp1/rp1-peripherals.pdf
@@ -30,19 +33,6 @@
 /* Bit and mask helpers */
 #define RP1BIT(x)		(1 << (x))
 #define RP1MASK(x,y)	((x) << (y))
-
-/* Register access modifiers */
-#if !defined(__I) && !defined(__O) && !defined(__IO)
-#ifdef __cplusplus
-#define __I  volatile		/* read only permission */
-#else
-#define __I  volatile const	/* read only permission */
-#endif
-#define __O	 volatile		/* write only permission */
-#define __IO volatile		/* read/write permission */
-#else
-#error "Possible define collision for __I, __O and __IO"
-#endif
 
 /*
  * The RP1 is PCIe connected and memory mapped. There are several devices

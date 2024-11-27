@@ -42,11 +42,8 @@
 #include "llio_info.h"
 #include "eshellf.h"
 
+#include "dtcboards.h"
 #include "rp1dev.h"
-
-
-// Forced inline expansion
-#define RPSPI_ALWAYS_INLINE	__attribute__((always_inline))
 
 //#define RPSPI_DEBUG_PIN	23	// Define for pin-debugging
 
@@ -231,58 +228,18 @@ static int spi_debug = -1;
 RTAPI_MP_INT(spi_debug, "Set message level for debugging purpose [0...5] where 0=none and 5=all (default: -1; upstream defined)")
 
 /*********************************************************************/
-/*
- * Synchronized read and write to peripheral memory.
- * Ensures coherency between cores, cache and peripherals
- */
-#define rmb()	__sync_synchronize()	// Read sync (finish all reads before continuing)
-#define wmb()	__sync_synchronize()	// Write sync (finish all write before continuing)
-
-RPSPI_ALWAYS_INLINE static inline uint32_t reg_rd(const volatile void *addr)
-{
-	uint32_t val;
-	val = *(volatile uint32_t *)addr;
-	rmb();
-	return val;
-}
-
-RPSPI_ALWAYS_INLINE static inline void reg_wr(const volatile void *addr, uint32_t val)
-{
-	wmb();
-	*(volatile uint32_t *)addr = val;
-}
-
-/* These are the unsynchronised versions. These may limit the latency of the
- * PCIe transactions by enabling pipe-lining of the transactions.
- */
-RPSPI_ALWAYS_INLINE static inline uint32_t reg_rd_raw(const volatile void *addr)
-{
-	uint32_t val;
-	val = *(volatile uint32_t *)addr;
-	return val;
-}
-
-RPSPI_ALWAYS_INLINE static inline void reg_wr_raw(const volatile void *addr, uint32_t val)
-{
-	*(volatile uint32_t *)addr = val;
-}
-
-/*********************************************************************/
 #ifdef RPSPI_DEBUG_PIN
-RPSPI_ALWAYS_INLINE static inline void gpio_set(int pin)
+HWREGACCESS_ALWAYS_INLINE static inline void gpio_set(int pin)
 {
 	if(pin >= 0 && pin < 28)
 		reg_wr_raw(&rio0->set.out, 1 << pin);
 }
 
-RPSPI_ALWAYS_INLINE static inline void gpio_clr(int pin)
+HWREGACCESS_ALWAYS_INLINE static inline void gpio_clr(int pin)
 {
 	if(pin >= 0 && pin < 28)
 		reg_wr_raw(&rio0->clr.out, 1 << pin);
 }
-#else
-RPSPI_ALWAYS_INLINE static inline void gpio_set(int pin) { (void)pin; }
-RPSPI_ALWAYS_INLINE static inline void gpio_clr(int pin) { (void)pin; }
 #endif
 
 /*********************************************************************/
@@ -300,10 +257,13 @@ static inline uint32_t mk_write_cmd(uint32_t addr, uint32_t msglen, bool aib)
 	return (addr << 16) | CMD_7I90_WRITE | (aib ? CMD_7I90_ADDRINC : 0) | (msglen << 4);
 }
 
+/*
+ * Buffer managenemt for queued transfers.
+ */
 static int buffer_check_room(buffer_t *b, size_t n, size_t elmsize)
 {
 	if(!b->ptr || !b->na) {
-		b->na = 256;	// Default to this many elements
+		b->na = 64;	// Default to this many elements
 		b->n = 0;
 		b->ptr = rtapi_kmalloc(elmsize * b->na, RTAPI_GPF_KERNEL);
 		return b->ptr == NULL;
@@ -313,8 +273,10 @@ static int buffer_check_room(buffer_t *b, size_t n, size_t elmsize)
 		do {
 			b->na *= 2;	// Double storage capacity
 		} while(b->n + n > b->na);	// Until we have enough room
-		b->ptr = rtapi_krealloc(b->ptr, elmsize * b->na, RTAPI_GPF_KERNEL);
-		return b->ptr == NULL;
+		void *p = rtapi_krealloc(b->ptr, elmsize * b->na, RTAPI_GPF_KERNEL);
+		if(!p)
+			return 1;
+		b->ptr = p;
 	}
 	return 0;
 }
@@ -488,7 +450,7 @@ static int hm2_rp5spi_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *buffer
 }
 
 /*
- * HM2 interface: Queued reads
+ * HM2 interface: Queue read
  * Collects the read address and buffer for bulk-read later on.
  */
 static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *buffer, int size)
@@ -534,7 +496,7 @@ static int hm2_rp5spi_queue_read(hm2_lowlevel_io_t *llio, rtapi_u32 addr, void *
  */
 static int hm2_rp5spi_send_queued_reads(hm2_lowlevel_io_t *llio)
 {
-	uint32_t cookie[4] = {0, 0, 0, 0};
+	uint32_t cookie[3] = {0, 0, 0};
 	hm2_rp5spi_t *hm2 = (hm2_rp5spi_t *)llio;
 	int rv;
 
@@ -574,7 +536,7 @@ static int hm2_rp5spi_receive_queued_reads(hm2_lowlevel_io_t *llio)
 }
 
 /*
- * HM2 interface: Queued writes
+ * HM2 interface: Queue write
  * Collects the write address and data for bulk-write later on.
  */
 static int hm2_rp5spi_queue_write(hm2_lowlevel_io_t *llio, rtapi_u32 addr, const void *buffer, int size)
@@ -979,43 +941,6 @@ static int hm2_rp5spi_setup(void)
 	if(spi_debug >= RTAPI_MSG_NONE && spi_debug <= RTAPI_MSG_ALL)
 		rtapi_set_msg_level(spi_debug);
 
-	// Info about the hardware platform, see:
-	//  https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#best-practices-for-revision-code-usage
-	//  https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#check-raspberry-pi-model-and-cpu-across-distributions
-	//
-	// Reading /proc/device-tree/compatible should contain the relevant
-	// information. We should get a buffer containing a stringlist:
-	//   "raspberrypi,5-model-b\0brcm,bcm2712\0"
-	// And yes, it has embedded NULs.
-	//
-#define DTC_BOARD_MAKE_RPI		"raspberrypi"
-#define DTC_BOARD_MODEL_5B		"5-model-b"
-#define DTC_BOARD_MODEL_4CM		"4-compute-module"
-#define DTC_BOARD_MODEL_4B		"4-model-b"
-#define DTC_BOARD_MODEL_3CM		"3-compute-module"
-#define DTC_BOARD_MODEL_3BP		"3-model-b-plus"
-#define DTC_BOARD_MODEL_3AP		"3-model-a-plus"
-#define DTC_BOARD_MODEL_3B		"3-model-b"
-#define DTC_BOARD_MODEL_2B		"2-model-b"
-#define DTC_BOARD_MODEL_CM		"compute-module"
-#define DTC_BOARD_MODEL_BP		"model-b-plus"
-#define DTC_BOARD_MODEL_AP		"model-a-plus"
-#define DTC_BOARD_MODEL_BR2		"model-b-rev2"
-#define DTC_BOARD_MODEL_B		"model-b"
-#define DTC_BOARD_MODEL_A		"model-a"
-#define DTC_BOARD_MODEL_ZERO_2W	"model-zero-2-w"
-#define DTC_BOARD_MODEL_ZERO_W	"model-zero-w"
-#define DTC_BOARD_MODEL_ZERO	"model-zero"
-
-#define DTC_SOC_MAKE_BRCM		"brcm"
-#define DTC_SOC_MODEL_BCM2712	"bcm2712"
-#define DTC_SOC_MODEL_BCM2711	"bcm2711"
-#define DTC_SOC_MODEL_BCM2837	"bcm2837"
-#define DTC_SOC_MODEL_BCM2836	"bcm2836"
-#define DTC_SOC_MODEL_BCM2835	"bcm2835"
-
-#define RPI_MODEL_5B		DTC_BOARD_MAKE_RPI "," DTC_BOARD_MODEL_5B
-
 	buflen = read_file("/proc/device-tree/compatible", buf, sizeof(buf));
 	if(buflen <= 0) {
 		LL_ERR("Failed to read platform identity.\n");
@@ -1025,9 +950,10 @@ static int hm2_rp5spi_setup(void)
 	// Check each string in the stringlist and test for our compatibility
 	// string. Don't go beyond the buffer's size.
 	for(cptr = buf; cptr;) {
-		// The "Raspberry Pi 5 Model B" is currently the only one supported by
-		// this driver.
-		if(!strcmp(cptr, RPI_MODEL_5B)) {
+		// The "Raspberry Pi 5 Model B", "Raspberry Pi Compute Module 5"
+		// and "Raspberry Pi Compute Module 5 Lite" are the boards
+		// supported by this driver.
+		if(!strcmp(cptr, DTC_RPI_MODEL_5B) || !strcmp(cptr, DTC_RPI_MODEL_5CM)) {
 			break;	// Found our board
 		}
 		j = strlen(cptr);
@@ -1062,12 +988,14 @@ static int hm2_rp5spi_setup(void)
 		// is too low for any realtime stuff, but nice for debugging the interface.
 		// It is also rather too fast for most hardware interfaces.
 		if(spiclk_rate[i] < SCLK_FREQ_MIN || spiclk_rate[i] > SCLK_FREQ_MAX) {
-			LL_ERR("SPI clock rate '%d' at index %d too slow/fast. Must be >= %d kHz and <= %d kHz\n", spiclk_rate[i], i, SCLK_FREQ_MIN, SCLK_FREQ_MAX);
+			LL_ERR("SPI clock rate '%d' at index %d too slow/fast. Must be >= %d kHz and <= %d kHz\n",
+					spiclk_rate[i], i, SCLK_FREQ_MIN, SCLK_FREQ_MAX);
 			return -EINVAL;
 		}
 
 		if(spiclk_rate_rd[i] < SCLK_FREQ_MIN || spiclk_rate_rd[i] > SCLK_FREQ_MAX) {
-			LL_ERR("SPI clock rate at for reading '%d' at index %d too slow/fast. Must be >= %d kHz and <= %d kHz\n", spiclk_rate_rd[i], i, SCLK_FREQ_MIN, SCLK_FREQ_MAX);
+			LL_ERR("SPI clock rate at for reading '%d' at index %d too slow/fast. Must be >= %d kHz and <= %d kHz\n",
+					spiclk_rate_rd[i], i, SCLK_FREQ_MIN, SCLK_FREQ_MAX);
 			return -EINVAL;
 		}
 	}
