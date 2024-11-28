@@ -12,13 +12,13 @@ boards, with HostMot2 firmware.
 ____
 *config* [default: ""]::
   HostMot2 config strings, described in the *hostmot2*(9) manpage.
-*spiclk_rate* [default: 25000,-1,-1,-1,-1]::
+*spiclk_rate* [default: 25000]::
   Specify the SPI clock rate in kHz for each probed board. See *SPI
   CLOCK RATES* below. Each entry follows the *spi_probe* setting, where
-  each probe takes the next value of the *spi_rate* list. A *spi_rate* or
-  -1 automatically selects the first rate in the list. You may truncate
-  the list to the number of boards you use.
-*spiclk_rate_rd* [default: -1,-1,-1,-1,-1 (same as *spiclk_rate*)]::
+  each probe takes the next value of the *spi_rate* list. A *spi_rate* of
+  0 (zero) or less automatically selects the first rate in the list. You
+  may truncate the list to the number of boards you use.
+*spiclk_rate_rd* [default: same as *spiclk_rate*]::
   Specify the SPI read clock rate in kHz. Usually you read and write at
   the same speed. However, you may want to reduce the reading speed if
   the round-trip is too long (see *SPI CLOCK RATES* below). You may
@@ -74,14 +74,7 @@ program.
 hm2_rp5spi is only available when LinuxCNC is configured with "uspace"
 realtime. It works with Raspian and PREEMPT_RT kernel.
 
-It is *strongly* recommended that you unload/disable the kernel's SPI
-drivers *dw_spi* and *dw_spi_mmio* (on Raspbian use the *raspi-config*
-program's "Interface Options" configuration). The hm2_rp5spi driver
-attempts to unload the kernel driver at startup and restore it at exit
-if loaded at startup. However, there are no guarantees about the
-effectiveness of the module unload/load actions. +
-Please note that having both kernel and user-space SPI drivers installed
-can result in unexpected interactions and system instabilities.
+See also *NOTES* below.
 
 == INTERFACE CONFIGURATION
 
@@ -91,22 +84,22 @@ connected to a separate SPI port. You can choose which CE lines you
 prefer or fit the design and setup the *spi_probe* parameter to instruct
 the driver where to search for the board(s).
 
-== REALTIME PERFORMANCE OF THE RP1-SPI DRIVER
+== REALTIME PERFORMANCE OF THE RP1 SPI DRIVER
 
 TBD.
 
 == SPI CLOCK RATES
 
-The maximum SPI clock of the RP1-SPI driver and is documented over
-33MHz. The SPI driver can provide frequencies well beyond what is
-acceptable for any board. A safe value to start with would be 12.5 MHz
+The SPI driver can provide frequencies well beyond what is acceptable
+for any board. A safe value to start with would be 12.5 MHz
 (spiclk_rate=12500) and then work your way up from there.
 
 The SPI driver generates (very) discrete clock frequency values,
 especially in the MHz range because of a simple clock divider structure.
 The base frequency is 200 MHz and the divider for SPI0/SPI1 scales using
-discrete factors. The following list specifies the *spiclk_rate* setting
-and the discrete SPI clock frequency (200 MHz / (2n) for n > 1):
+discrete factors. The following list specifies the *spiclk_rate* and
+*spiclk_rate_rd* settings and the discrete SPI clock frequency (200 MHz
+/ (2n) for n > 1):
  - 50000 - 50.000 MHz, - 33333 - 33.333 MHz, - 25000 - 25.000 MHz,
  - 20000 - 20.000 MHz, - 16666 - 16.666 MHz, - 14285 - 14.285 MHz,
  - 12500 - 12.500 MHz, - 11111 - 11.111 MHz, - 10000 - 10.000 MHz,
@@ -131,13 +124,35 @@ You can set the read clock frequency to a lower value (using
 needed for read actions. For example, you can write at 33.33 MHz and
 read at 25.00 MHz.
 
-It should be noted that the Raspberry Pi 5 *must* have an adequate 5V
-power supply and the power should be properly decoupled. At high speeds
-and noise on the supply, there is the possibility of strange behaviour
-if the noise gets out of hand.
+The maximum SPI clock of the RP1 SPI driver has been tested up to
+50 MHz write speed and 33 MHz read speed on the 7C80 and 7C81. However,
+it is not recommended to run at the limit on production systems. A safe
+setting would be to set one step below the maximum speeds.
 
-Also be sure to have a proper *active* heat-sink mounted on the SoC or it
-will get too warm and crashes.
+== NOTES
+
+It is *strongly* recommended that you unload/disable the kernel's SPI
+drivers *dw_spi* and *dw_spi_mmio* (on Raspbian use the *raspi-config*
+program's "Interface Options" configuration). The hm2_rp5spi driver
+attempts to unload the kernel driver at startup if detected and restores
+it at exit if initially loaded. However, there are no guarantees about
+the effectiveness of the module unload/load actions.
+
+*Warning*: having both kernel and user-space SPI drivers installed can
+result in unexpected interactions and system instabilities.
+
+The Raspberry Pi 5 *must* have an adequate 5V power supply and the power
+should be properly decoupled. At high speeds and noise on the supply,
+there is the possibility of strange behaviour if the noise gets out of
+hand.
+
+The 7C80 provides enough local power to the host via the interface
+header if your external power supply is adequate (on connector TB6). The
+7C81 needs an adequate external 5V power supply (on connector TB1) and
+feeds it directly to the host interface header.
+
+Also be sure to have a proper *active* heat-sink mounted on the
+Raspberry 5 SoC or it will get too warm and may crash.
 
 == SEE ALSO
 
