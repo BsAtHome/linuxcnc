@@ -153,8 +153,8 @@ static const uint32_t iocookie[3] = {
 static char *config[RPSPI_MAX_BOARDS];
 RTAPI_MP_ARRAY_STRING(config, RPSPI_MAX_BOARDS, "config string for the AnyIO boards (see hostmot2(9) manpage)")
 
-static int spiclk_rate[RPSPI_MAX_BOARDS] = {SCLK_FREQ_DEF, -1, -1, -1, -1};
-static int spiclk_rate_rd[RPSPI_MAX_BOARDS] = {-1, -1, -1, -1, -1};
+static int spiclk_rate[RPSPI_MAX_BOARDS] = { SCLK_FREQ_DEF };
+static int spiclk_rate_rd[RPSPI_MAX_BOARDS];
 RTAPI_MP_ARRAY_INT(spiclk_rate, RPSPI_MAX_BOARDS, "SPI clock rates in kHz (default " PPSTR(SCLK_FREQ_DEF) " kHz, slowest " PPSTR(SCLK_FREQ_MIN) " kHz)")
 RTAPI_MP_ARRAY_INT(spiclk_rate_rd, RPSPI_MAX_BOARDS, "SPI clock rates for reading in kHz (default same as spiclk_rate)")
 
@@ -243,18 +243,30 @@ HWREGACCESS_ALWAYS_INLINE static inline void gpio_clr(int pin)
 #endif
 
 /*********************************************************************/
-#define CMD_7I90_READ		(0x0a << 12)
-#define CMD_7I90_WRITE		(0x0b << 12)
-#define CMD_7I90_ADDRINC	(1 << 11)
-// aib (address increment bit)
+/*
+ * HM2 command interface format (all 32-bit words):
+ *   <cmd-word> [0..127 data-words]
+ *
+ * Command word format:
+ *  MSB....................................LSB
+ *   aaaa aaaa aaaa aaaa cccc i nnn nnnn 0000
+ * - a: register address to read/write
+ * - c: read (0xa) or write (0xb) command
+ * - i: auto address increment enable if 1
+ * - n: number of data words [1..127] to follow (burst length)
+ * - 0: unused, should be zero
+ */
+#define HM2_CMD_READ	0x0000a000
+#define HM2_CMD_WRITE	0x0000b000
+#define HM2_CMD_ADDRINC	0x00000800
 static inline uint32_t mk_read_cmd(uint32_t addr, uint32_t msglen, bool aib)
 {
-	return (addr << 16) | CMD_7I90_READ | (aib ? CMD_7I90_ADDRINC : 0) | (msglen << 4);
+	return (addr << 16) | HM2_CMD_READ | (aib ? HM2_CMD_ADDRINC : 0) | ((msglen & 0x7f) << 4);
 }
 
 static inline uint32_t mk_write_cmd(uint32_t addr, uint32_t msglen, bool aib)
 {
-	return (addr << 16) | CMD_7I90_WRITE | (aib ? CMD_7I90_ADDRINC : 0) | (msglen << 4);
+	return (addr << 16) | HM2_CMD_WRITE | (aib ? HM2_CMD_ADDRINC : 0) | ((msglen & 0x7f) << 4);
 }
 
 /*
@@ -941,13 +953,14 @@ static int hm2_rp5spi_setup(void)
 	if(spi_debug >= RTAPI_MSG_NONE && spi_debug <= RTAPI_MSG_ALL)
 		rtapi_set_msg_level(spi_debug);
 
+	// Read the 'compatible' string-list from the device-tree
 	buflen = read_file("/proc/device-tree/compatible", buf, sizeof(buf));
 	if(buflen <= 0) {
 		LL_ERR("Failed to read platform identity.\n");
 		return -1;
 	}
 
-	// Check each string in the stringlist and test for our compatibility
+	// Check each string in the string-list and test for our compatibility
 	// string. Don't go beyond the buffer's size.
 	for(cptr = buf; cptr;) {
 		// The "Raspberry Pi 5 Model B", "Raspberry Pi Compute Module 5"
@@ -973,12 +986,20 @@ static int hm2_rp5spi_setup(void)
 	if(read_file("/proc/device-tree/model", buf, sizeof(buf)) > 0)
 		LL_INFO("Platform: %s\n", buf);
 
+	// Now we know what platform we are running, remove kernel SPI module if
+	// detected
+	if((has_spi_module = (0 == shell("/usr/bin/grep -qw ^dw_spi_mmio /proc/modules")))) {
+		if(shell("/sbin/rmmod dw_spi_mmio dw_spi"))
+			LL_ERR("Unable to remove kernel SPI modules dw_spi_mmio and dw_spi. "
+					"Your system may become unstable using LinuxCNC with the " HM2_LLIO_NAME " driver.");
+	}
+
 	// Check the clock rate settings from the config
 	for(i = 0; i < RPSPI_MAX_BOARDS; i++) {
-		if(-1 == spiclk_rate[i])	// If not specified
+		if(spiclk_rate[i] < 1)	// If not specified
 			spiclk_rate[i] = spiclk_rate[0];	// use first
 
-		if(-1 == spiclk_rate_rd[i])	// If not specified
+		if(spiclk_rate_rd[i] < 1)	// If not specified
 			spiclk_rate_rd[i] = spiclk_rate[i];	// use write rate as read rate
 
 		// Lowest frequency : 200 MHz / 65534 ~ 3052 Hz
@@ -1082,13 +1103,6 @@ static void hm2_rp5spi_cleanup(void)
 int rtapi_app_main()
 {
 	int ret;
-
-	// Remove kernel SPI module if detected
-	if((has_spi_module = (0 == shell("/usr/bin/grep -qw ^dw_spi_mmio /proc/modules")))) {
-		if(shell("/sbin/rmmod dw_spi_mmio dw_spi"))
-			LL_ERR("Unable to remove kernel SPI modules dw_spi_mmio and dw_spi. "
-					"Your system may become unstable using LinuxCNC with the " HM2_LLIO_NAME " driver.");
-	}
 
 	if((comp_id = ret = hal_init(HM2_LLIO_NAME)) < 0)
 		goto fail;
