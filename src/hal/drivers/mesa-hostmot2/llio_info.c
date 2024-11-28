@@ -204,7 +204,7 @@ static const info_entry_t spiboards[] = {
 	},
 	{
 		.board_name = "MESA7I43",
-		.base_name = "hm2_7i43spi",
+		.base_name = "hm2_7i43",
 		.num_ioport_connectors = 2,
 		.pins_per_connector = 24,
 		.ioport_connector_name = { "P4", "P3" },
@@ -221,8 +221,6 @@ const char *set_llio_info_spi(hm2_lowlevel_io_t *llio, const hm2_idrom_t *idrom)
 {
 	int i, j;
 	char buf[sizeof(idrom->board_name)+1];
-
-	/* FIXME: We should do idrom validation here too... */
 
 	/* In the far future, when there are too many boards, use bsearch */
 	/* With few boards, linear search is faster */
