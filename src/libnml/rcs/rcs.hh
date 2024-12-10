@@ -28,7 +28,11 @@ class RCS_TIMER;
 class RCS_CMD_MSG;
 class RCS_STAT_MSG;
 
-enum class RCS_STATUS {               /* Originally from nml_mod.hh */
+// The enum is forced to have fixed underlying type of int because it is used
+// in a union with an int. Fixing the enum's underlying type assures equal
+// types for both members in the union.
+// See nml/stat_msg.hh and nml/stat_msg.cc how it is used.
+enum class RCS_STATUS : int {               /* Originally from nml_mod.hh */
     UNINITIALIZED = -1,
     DONE = 1,
     EXEC = 2,
