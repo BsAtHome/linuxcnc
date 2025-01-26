@@ -124,13 +124,13 @@ fail:
 
 bool from_python(PyObject *o, hal_u64_t *u) {
     PyObject *tmp = 0;
-    unsigned long long l;
+    long long l;
     tmp = PyLong_Check(o) ? o : PyNumber_Long(o);
     if(!tmp) goto fail;
 
     l = PyLong_AsLongLong(tmp);
     if(PyErr_Occurred()) goto fail;
-    if(l < 0 || l != (rtapi_u64)l) {
+    if(l < 0) {
         PyErr_Format(PyExc_OverflowError, "Value %lld out of range", l);
         goto fail;
     }
@@ -1829,9 +1829,6 @@ PyObject *stream_element_types(PyObject *_self, void *unused) {
     return self->pyelt;
 }
 
-// "deprecated conversion from string constant to 'char *'" occurs due to
-// missing const-qualifications in Python headers
-#pragma GCC diagnostic ignored "-Wwrite-strings"
 static PyMemberDef stream_members[] = {
     {"sampleno", T_UINT, offsetof(streamobj, sampleno), READONLY,
         "The number of the last successfully read sample"},
@@ -1848,7 +1845,6 @@ static PyGetSetDef stream_getset[] = {
     {"num_overruns", stream_getter<int>, NULL, NULL, VFC(hal_stream_num_overruns)},
     {}
 };
-#pragma GCC diagnostic warning "-Wwrite-strings"
 
 static void pystream_delete(PyObject *_self) {
     streamobj *self = reinterpret_cast<streamobj*>(_self);
