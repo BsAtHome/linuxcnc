@@ -12,6 +12,7 @@ for i in "$HEADERS"/*.h "$HEADERS"/*.hh; do
     */rtapi_app.h) continue ;;
     */interp_internal.hh) continue ;;
     esac
+
     if g++ ${CPPFLAGS} -std=c++11 -S -o /dev/null -xcxx /dev/null > /dev/null 2>&1; then
         ELEVEN=-std=c++11
     else

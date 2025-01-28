@@ -19,8 +19,8 @@ linuxcnc -r sim.ini &
 
 # let linuxcnc come up
 TOGO=80
-while [  $TOGO -gt 0 ]; do
-    echo "trying to connect to linuxcncrsh TOGO=$TOGO"
+while [ "$TOGO" -gt 0 ]; do
+    echo "I: trying to connect to linuxcncrsh TOGO=$TOGO"
     if nc -z localhost 5007; then
         break
     fi
@@ -28,7 +28,7 @@ while [  $TOGO -gt 0 ]; do
     TOGO=$((TOGO - 1))
 done
 if [  $TOGO -eq 0 ]; then
-    echo "connection to linuxcncrsh timed out"
+    echo "E: connection to linuxcncrsh timed out"
     exit 1
 fi
 
@@ -37,12 +37,12 @@ fi
     function introspect() {
         SEQUENCE_NUMBER=$1
         echo "set mdi m100 P6 Q$SEQUENCE_NUMBER"  # sequence number
-        echo 'set mdi m100 P0 Q#5420'             # X
-        echo 'set mdi m100 P1 Q#5421'             # Y
-        echo 'set mdi m100 P2 Q#5422'             # Z
-        echo 'set mdi m100 P3 Q#5400'             # toolno
-        echo 'set mdi m100 P4 Q#5403'             # TLO z
-        echo 'set mdi m100 P5'                    # blank line
+        echo "set mdi m100 P0 Q#5420"             # X
+        echo "set mdi m100 P1 Q#5421"             # Y
+        echo "set mdi m100 P2 Q#5422"             # Z
+        echo "set mdi m100 P3 Q#5400"             # toolno
+        echo "set mdi m100 P4 Q#5403"             # TLO z
+        echo "set mdi m100 P5"                    # blank line
     }
 
     echo "hello EMC mt 1.0"
@@ -78,7 +78,6 @@ fi
     echo "set mdi g43"
     introspect 8
 
-
     echo "set mdi t10 m6"
     introspect 9
 
@@ -102,7 +101,6 @@ fi
 
     echo "set mdi g43"
     introspect 16
-
 
     echo "set mdi t99999 m6"
     introspect 17
@@ -128,20 +126,17 @@ fi
     echo "set mdi g43"
     introspect 24
 
-
     echo "set mdi t1 m6"
     introspect 25
 
     echo "set mdi g43"
     introspect 26
 
-
     echo "set mdi t10 m6"
     introspect 27
 
     echo "set mdi g43"
     introspect 28
-
 
     echo "set mdi t99999 m6"
     introspect 29
@@ -153,7 +148,7 @@ fi
     # wait for linuxcnc to finish
     echo "set wait done"
 
-    echo shutdown
+    echo "shutdown"
 ) | nc localhost 5007
 
 

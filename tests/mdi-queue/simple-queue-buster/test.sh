@@ -43,7 +43,7 @@ NUM_MDIS_LEFT=$NUM_MDIS
 TOOL=1
 for i in $(seq 0 1000); do
     NUM_MDIS_LEFT=$((NUM_MDIS_LEFT - 1))
-    if [ $NUM_MDIS_LEFT -eq 0 ]; then
+    if [ "$NUM_MDIS_LEFT" -eq 0 ]; then
         echo "set mdi t$TOOL m6" >> lots-of-gcode
         if [ $TOOL -eq 1 ]; then
             TOOL=2
@@ -52,7 +52,7 @@ for i in $(seq 0 1000); do
         fi
 
         NUM_MDIS=$((NUM_MDIS + 1))
-        if [ $NUM_MDIS -gt 10 ]; then
+        if [ "$NUM_MDIS" -gt 10 ]; then
             NUM_MDIS=1
         fi
 
@@ -69,7 +69,7 @@ echo "P is -2.000000" >> expected-gcode-output
 
     # ask linuxcncrsh to not read the next command until it's done running
     # the current one
-    #echo set set_wait done
+    #echo "set set_wait done"
 
     echo "set mode manual"
     echo "set estop off"
@@ -85,7 +85,7 @@ echo "P is -2.000000" >> expected-gcode-output
     echo "set mdi m100 p-2"
     echo "set wait done"
 
-    echo shutdown
+    echo "shutdown"
 ) | nc localhost 5007
 
 

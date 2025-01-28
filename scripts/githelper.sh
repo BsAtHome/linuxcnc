@@ -1,3 +1,5 @@
+#!/bin/false
+# shellcheck disable=SC1008
 #
 # This is a bash shell fragment, intended to be sourced by scripts that
 # want to work with git in the emc2 repo.
@@ -29,19 +31,23 @@ function githelper() {
     case $GIT_BRANCH in
         master)
             GIT_TAG_GLOB="v2.10.*"
+            # shellcheck disable=SC2034
             DEB_COMPONENT="master"
             ;;
         # release branches have names matching "number.number", which is awkward to express as a glob
         [0-9].[0-9] | [0-9].[0-9][0-9] | [0-9].[0-9][0-9][0-9] | [0-9][0-9].[0-9] | [0-9][0-9].[0-9][0-9] | [0-9][0-9].[0-9][0-9][0-9])
             GIT_TAG_GLOB="v${GIT_BRANCH}.*"
+            # shellcheck disable=SC2034
             DEB_COMPONENT=$GIT_BRANCH
             ;;
         v2.5_branch)
             GIT_TAG_GLOB="v2.5*"
+            # shellcheck disable=SC2034
             DEB_COMPONENT="v2.5_branch"
             ;;
         v2.4_branch)
             GIT_TAG_GLOB="v2.4*"
+            # shellcheck disable=SC2034
             DEB_COMPONENT="v2.4_branch"
             ;;
         *)

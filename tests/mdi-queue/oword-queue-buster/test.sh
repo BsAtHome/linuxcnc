@@ -30,7 +30,7 @@ while [  $TOGO -gt 0 ]; do
     sleep 0.25
     TOGO=$((TOGO - 1))
 done
-if [  $TOGO -eq 0 ]; then
+if [ "$TOGO" -eq 0 ]; then
     echo "E: connection to linuxcncrsh timed out"
     exit 1
 fi
@@ -58,7 +58,7 @@ for i in $(seq 0 1000); do
         fi
 
         NUM_MDIS=$((NUM_MDIS + 1))
-        if [ $NUM_MDIS -gt 10 ]; then
+        if [ "$NUM_MDIS" -gt 10 ]; then
             NUM_MDIS=1
         fi
 
@@ -90,7 +90,7 @@ echo "P is -200.000000" >> expected-gcode-output
     echo "set mdi m100 p-200"
     echo "set wait done"
 
-    echo shutdown
+    echo "shutdown"
 ) | nc localhost 5007
 
 
