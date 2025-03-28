@@ -225,7 +225,7 @@ const char *hm2_hz_to_mhz(rtapi_u32 freq_hz) {
 
 // FIXME: It would be nice if this was more generic
 EXPORT_SYMBOL_GPL(hm2_get_bspi);
-int hm2_get_bspi(hostmot2_t** hm2, char *name){
+int hm2_get_bspi(hostmot2_t** hm2, const char *name){
     struct rtapi_list_head *ptr;
     int i;
     rtapi_list_for_each(ptr, &hm2_list) {
@@ -240,7 +240,7 @@ int hm2_get_bspi(hostmot2_t** hm2, char *name){
 }
 
 EXPORT_SYMBOL_GPL(hm2_get_uart);
-int hm2_get_uart(hostmot2_t** hm2, char *name){
+int hm2_get_uart(hostmot2_t** hm2, const char *name){
     struct rtapi_list_head *ptr;
     int i;
     rtapi_list_for_each(ptr, &hm2_list) {
@@ -254,7 +254,7 @@ int hm2_get_uart(hostmot2_t** hm2, char *name){
     return -1;
 }
 EXPORT_SYMBOL_GPL(hm2_get_pktuart);
-int hm2_get_pktuart(hostmot2_t** hm2, char *name){
+int hm2_get_pktuart(hostmot2_t** hm2, const char *name){
     struct rtapi_list_head *ptr;
     int i;
     rtapi_list_for_each(ptr, &hm2_list) {
@@ -269,7 +269,7 @@ int hm2_get_pktuart(hostmot2_t** hm2, char *name){
 }
 EXPORT_SYMBOL_GPL(hm2_get_sserial);
 // returns a pointer to a remote struct
-hm2_sserial_remote_t *hm2_get_sserial(hostmot2_t** hm2, char *name){
+hm2_sserial_remote_t *hm2_get_sserial(hostmot2_t** hm2, const char *name){
    // returns inst * 64 + remote index
     struct rtapi_list_head *ptr;
     int i, j;
