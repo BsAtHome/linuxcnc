@@ -1917,7 +1917,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 	for(unsigned i = 0; i < ninit; i++) {
 		initptr[i].addr    = be16_to_cpu(initptr[i].addr);
 		initptr[i].pincnt  = be16_to_cpu(initptr[i].pincnt);
-		initptr[i].flags   = be16_to_cpu(initptr[i].pincnt);
+		initptr[i].flags   = be16_to_cpu(initptr[i].flags);
 		initptr[i].timeout = be32_to_cpu(initptr[i].timeout);
 		initptr[i].dataptr = be32_to_cpu(initptr[i].dataptr);
 
@@ -1992,7 +1992,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 	for(unsigned c = 0; c < ncmds; c++) {
 		cmdsptr[c].addr    = be16_to_cpu(cmdsptr[c].addr);
 		cmdsptr[c].pincnt  = be16_to_cpu(cmdsptr[c].pincnt);
-		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].pincnt);
+		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].flags);
 		cmdsptr[c].timeout = be32_to_cpu(cmdsptr[c].timeout);
 		cmdsptr[c].dataptr = be32_to_cpu(cmdsptr[c].dataptr);
 
