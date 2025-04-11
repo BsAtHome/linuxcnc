@@ -182,6 +182,7 @@ static void llio_noqueue_warn(const hostmot2_t *hm2)
     warned = 1;
 }
 
+#if 0
 EXPORT_SYMBOL_GPL(hm2_pktuart_setup_rx);
 int hm2_pktuart_setup_rx(const char *name, unsigned int bitrate, unsigned int filter_hz, unsigned int parity, int frame_delay, bool rx_enable, bool rx_mask){
     hostmot2_t *hm2;
@@ -235,7 +236,6 @@ int hm2_pktuart_setup_rx(const char *name, unsigned int bitrate, unsigned int fi
     return 0;
 }
 
-EXPORT_SYMBOL_GPL(hm2_pktuart_setup_tx);
 int hm2_pktuart_setup_tx(const char *name, unsigned int bitrate, unsigned int parity, int frame_delay, bool drive_enable, bool drive_auto, int enable_delay){
     hostmot2_t *hm2;
     hm2_pktuart_instance_t *inst = 0;
@@ -283,6 +283,219 @@ int hm2_pktuart_setup_tx(const char *name, unsigned int bitrate, unsigned int pa
 
     return 0;
 }
+#endif
+
+//
+// The hm2_pktuart_setup_tx() function is DEPRECATED
+//
+EXPORT_SYMBOL_GPL(hm2_pktuart_setup_tx);
+int hm2_pktuart_setup_tx(const char *name, unsigned int bitrate, unsigned int parity, int frame_delay, bool drive_enable, bool drive_auto, int enable_delay)
+{
+    hm2_pktuart_config_t cfg = {
+        .baudrate   = bitrate,
+        .filterrate = 0,
+        .parity     = parity,
+        .stopbits   = 0,  // 1 stopbit fixed
+        .drivedelay = enable_delay,
+        .ifdelay    = frame_delay,
+        .flags      = 0
+    };
+    if(drive_enable) cfg.flags |= HM2_PKTUART_CONFIG_DRIVEEN;
+    if(drive_auto)   cfg.flags |= HM2_PKTUART_CONFIG_DRIVEAUTO;
+    return hm2_pktuart_config(name, NULL, &cfg, 0);	// Send immediately
+}
+
+//
+// The hm2_pktuart_setup_rx() function is DEPRECATED
+//
+EXPORT_SYMBOL_GPL(hm2_pktuart_setup_rx);
+int hm2_pktuart_setup_rx(const char *name, unsigned int bitrate, unsigned int filter_hz, unsigned int parity, int frame_delay, bool rx_enable, bool rx_mask)
+{
+    hm2_pktuart_config_t cfg = {
+        .baudrate   = bitrate,
+        .filterrate = filter_hz,
+        .parity     = parity,
+        .stopbits   = 0,  // 1 stopbit fixed
+        .drivedelay = 0,
+        .ifdelay    = frame_delay,
+        .flags      = 0
+    };
+    if(rx_enable) cfg.flags |= HM2_PKTUART_CONFIG_RXEN;
+    if(rx_mask)   cfg.flags |= HM2_PKTUART_CONFIG_RXMASKEN;
+    return hm2_pktuart_config(name, &cfg, NULL, 0);	// Send immediately
+}
+
+static int config_tx(const char *name, const hostmot2_t* hm2, hm2_pktuart_instance_t *inst, const hm2_pktuart_config_t *cfg, int queue)
+{
+    rtapi_u32 bitrate;
+    rtapi_u32 mode = 0;
+    int r;
+
+    if(cfg->flags & HM2_PKTUART_CONFIG_BITRATEVAL) {
+        bitrate = cfg->baudrate;
+    } else {
+        if (hm2->pktuart.tx_version >= 2) {
+            bitrate = (rtapi_u64)cfg->baudrate * 16777216ul / inst->clock_freq; // 24 bits in v2+
+        } else {
+            bitrate = (rtapi_u64)cfg->baudrate * 1048576ul / inst->clock_freq;  // 20 bits in v0 & v1
+        }
+    }
+
+    if(cfg->ifdelay > 0xff) {
+        if(hm2->pktuart.tx_version >= 3) {
+            mode |= HM2_PKTUART_TXMODE_IFSCALE;
+            if(cfg->ifdelay > 0x3fc)
+                mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+            else
+                mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay >> 2);
+        } else {
+            mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+        }
+    } else {
+        mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay);
+    }
+    mode |= HM2_PKTUART_TXMODE_DRIVEENDLY(cfg->drivedelay);
+    if (cfg->flags & HM2_PKTUART_CONFIG_DRIVEAUTO) mode |= HM2_PKTUART_TXMODE_DRIVEAUTO;
+    if (cfg->flags & HM2_PKTUART_CONFIG_DRIVEEN)   mode |= HM2_PKTUART_TXMODE_DRIVEEN;
+    if (cfg->parity != 0) mode |= HM2_PKTUART_TXMODE_PARITYEN;
+    if (cfg->parity == 1) mode |= HM2_PKTUART_TXMODE_PARITYODD;
+    if (hm2->pktuart.tx_version >= 3 && cfg->stopbits) mode |= HM2_PKTUART_TXMODE_STOPBITS;
+
+    int (*writefn)(hm2_lowlevel_io_t *, rtapi_u32, const void *, int);
+    const char *writenm;
+    if(queue && hm2->llio->queue_write) {
+        writefn = hm2->llio->queue_write;
+        writenm = "queue_write";
+    } else {
+        writefn = hm2->llio->write;
+        writenm = "write";
+    }
+
+    if (!(cfg->flags & HM2_PKTUART_CONFIG_NOBAUDRATE) && ((cfg->flags & HM2_PKTUART_CONFIG_FORCECONFIG) || bitrate != inst->tx_bitrate)) {
+        inst->tx_bitrate = bitrate;
+        if ((r = writefn(hm2->llio, inst->tx_bitrate_addr, &bitrate, sizeof(bitrate))) < 0) {
+            HM2_ERR("Setup TX baudrate: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    if (!(cfg->flags & HM2_PKTUART_CONFIG_NOMODE) && ((cfg->flags & HM2_PKTUART_CONFIG_FORCECONFIG) || mode != inst->tx_mode)) {
+        inst->tx_mode = mode;
+        if ((r = writefn(hm2->llio, inst->tx_mode_addr, &mode, sizeof(mode))) < 0) {
+            HM2_ERR("Setup TX mode: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    if (cfg->flags & HM2_PKTUART_CONFIG_FLUSH) {
+        rtapi_u32 buff = HM2_PKTUART_CLEAR; // clear data FIFO and count register
+        if ((r = writefn(hm2->llio, inst->tx_mode_addr, &buff, sizeof(buff))) < 0) {
+            HM2_ERR("Setup TX flush: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    return 0;
+}
+
+static int config_rx(const char *name, const hostmot2_t *hm2, hm2_pktuart_instance_t *inst, const hm2_pktuart_config_t *cfg, int queue)
+{
+    rtapi_u32 bitrate;
+    rtapi_u32 mode = 0;
+    rtapi_u32 filter = cfg->filterrate ? cfg->filterrate : 2*cfg->baudrate;
+    int r = 0;
+
+    if(cfg->flags & HM2_PKTUART_CONFIG_BITRATEVAL) {
+        bitrate = cfg->baudrate;
+        if (filter > 0xFF) filter = 0xFF;
+    } else {
+        filter = inst->clock_freq / filter;
+        if (hm2->pktuart.rx_version >= 2){
+            if (filter > 0xFFFF) filter = 0xFFFF;
+            bitrate = (rtapi_u64)cfg->baudrate * 16777216ul / inst->clock_freq; // 24 bits in v2+
+            bitrate |= (rtapi_u32)((filter & 0xFF00) << 16); // High 8 bits
+            // Low 8 filter bits set below
+        } else {
+            if (filter > 0xFF) filter = 0xFF;
+            bitrate = (rtapi_u64)cfg->baudrate * 1048576ul / inst->clock_freq;  // 20 bits in v0 & v1
+            // Low 8 filter bits set below
+        }
+    }
+    if(cfg->ifdelay > 0xff) {
+        if(hm2->pktuart.rx_version >= 3) {
+            mode |= HM2_PKTUART_TXMODE_IFSCALE;
+            if(cfg->ifdelay > 0x3fc)
+                mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+            else
+                mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay >> 2);
+        } else {
+            mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+        }
+    } else {
+        mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay);
+    }
+    mode |= HM2_PKTUART_RXMODE_RXFILTER(filter); // Low 8 bits
+    if (cfg->flags & HM2_PKTUART_CONFIG_RXMASKEN) mode |= HM2_PKTUART_RXMODE_RXMASKEN;
+    if (cfg->flags & HM2_PKTUART_CONFIG_RXEN)     mode |= HM2_PKTUART_RXMODE_RXEN;
+    if (cfg->parity >  0) mode |= HM2_PKTUART_RXMODE_PARITYEN;
+    if (cfg->parity == 1) mode |= HM2_PKTUART_RXMODE_PARITYODD;
+
+    int (*writefn)(hm2_lowlevel_io_t *, rtapi_u32, const void *, int);
+    const char *writenm;
+    if(queue && hm2->llio->queue_write) {
+        writefn = hm2->llio->queue_write;
+        writenm = "queue_write";
+    } else {
+        writefn = hm2->llio->write;
+        writenm = "write";
+    }
+
+    if (!(cfg->flags & HM2_PKTUART_CONFIG_NOBAUDRATE) && ((cfg->flags & HM2_PKTUART_CONFIG_FORCECONFIG) || bitrate != inst->rx_bitrate)) {
+        inst->rx_bitrate = bitrate;
+        if ((r = writefn(hm2->llio, inst->rx_bitrate_addr, &bitrate, sizeof(bitrate))) < 0) {
+            HM2_ERR("Setup RX baudrate: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    if (!(cfg->flags & HM2_PKTUART_CONFIG_NOMODE) && ((cfg->flags & HM2_PKTUART_CONFIG_FORCECONFIG) || mode != inst->rx_mode)) {
+        inst->rx_mode = mode;
+        if ((r = writefn(hm2->llio, inst->rx_mode_addr, &mode, sizeof(mode))) < 0) {
+            HM2_ERR("Setup RX mode: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    if (cfg->flags & HM2_PKTUART_CONFIG_FLUSH) {
+        rtapi_u32 buff = HM2_PKTUART_CLEAR; // clear data FIFO and count register
+        if ((r = writefn(hm2->llio, inst->rx_mode_addr, &buff, sizeof(buff))) < 0) {
+            HM2_ERR("Setup RX flush: hm2->llio->%s failure %s (error %d)\n", writenm, name, r);
+            return r;
+        }
+    }
+    return 0;
+}
+
+EXPORT_SYMBOL_GPL(hm2_pktuart_config);
+int hm2_pktuart_config(const char *name, const hm2_pktuart_config_t *rxcfg, const hm2_pktuart_config_t *txcfg, int queue)
+{
+    hostmot2_t *hm2;
+    int r;
+
+    int i = hm2_get_pktuart(&hm2, name);
+    if (i < 0) {
+        HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
+        return -EINVAL;
+    }
+
+    llio_noqueue_warn(hm2);
+    hm2_pktuart_instance_t *inst = &hm2->pktuart.instance[i];
+
+    if(rxcfg) {
+        if((r = config_rx(name, hm2, inst, rxcfg, queue)) < 0)
+            return r;
+    }
+    if(txcfg) {
+        if((r = config_tx(name, hm2, inst, rxcfg, queue)) < 0)
+            return r;
+    }
+    return 0;
+}
 
 static void perform_reset(const char *name, int queue)
 {
@@ -325,7 +538,9 @@ void hm2_pktuart_queue_reset(const char *name)
     perform_reset(name, 1);
 }
 
-
+//
+// The hm2_pktuart_setup() function is DEPRECATED
+//
 EXPORT_SYMBOL_GPL(hm2_pktuart_setup);
 // use -1 for bitrate, tx_mode and rx_mode to leave the mode unchanged
 // use 1 for txclear or rxclear to issue a clear command for Tx or Rx registers
@@ -407,7 +622,6 @@ int hm2_pktuart_setup(const char *name, unsigned bitrate, rtapi_s32 tx_mode, rta
 
     return 0;
 }
-
 
 EXPORT_SYMBOL_GPL(hm2_pktuart_send);
 int hm2_pktuart_send(const char *name, const unsigned char data[], rtapi_u8 *num_frames, const rtapi_u16 frame_sizes[])
