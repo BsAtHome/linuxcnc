@@ -644,7 +644,7 @@ def handleInits(inits):
 
             # Must have a function
             # Only functions tagged are allowed
-            function = cmd.attrib['function']
+            function = cmd.attrib['function'].upper()
             if function not in FUNCTIONS:
                 perr("Function '{}' out of range {} in {}".format(function, str(list(FUNCTIONS.keys())), lil))
                 continue
@@ -734,7 +734,7 @@ def handleInits(inits):
                         if 'modbustype' in data.attrib or mtype != U_AB:
                             pwarn("Attribute 'modbustype' ignored for W_COIL(5) and always set to U_AB in {}".format(ldl))
                         if value != 0 and value != 0xff00:
-                            pwarn("Data value '{}' for W_COIL(5) is normally expected to be 0 or 0xff00 (65280) in {}".format(maxval, ldl))
+                            pwarn("Data value '{}' for W_COIL(5) is normally expected to be 0 or 0xff00 (65280) in {}".format(value, ldl))
                         datalist.append(struct.pack('>H', value));
                         dlnbytes += 2
                     elif W_COILS == function:
@@ -920,7 +920,7 @@ def handleCommands(commands):
             if 'function' not in cmd.attrib:
                 perr("Attribute 'function' missing in {}".format(lcl))
                 continue
-            function = cmd.attrib['function']
+            function = cmd.attrib['function'].upper()
             # check depends on unicast or broadcast
             if 'broadcast' == device:
                 if function not in WRITEFUNCTIONS:
@@ -942,7 +942,7 @@ def handleCommands(commands):
                 # Coils and inputs are binary and always map to HAL_BIT
                 if 'modbustype' in cmd.attrib:
                     pwarn("Attribute 'modbustype' ignored for bit functions ({}) in {}".format(str(list(BITFUNCTIONS.keys())), lcl))
-                if 'haltype' in cmd.attrib and cmd.attrib['haltype'] != 'HAL_BIT':
+                if 'haltype' in cmd.attrib and cmd.attrib['haltype'].upper() != 'HAL_BIT':
                     pwarn("Attribute 'haltype' ignore for bit functions (always HAL_BIT) in {}".format(lcl))
                 nwords   = 1
                 maxcount = 2000
@@ -953,7 +953,7 @@ def handleCommands(commands):
                 if 'haltype' not in cmd.attrib:
                     perr("Attribute 'haltype' missing in {}".format(lcl))
                     continue
-                haltype = cmd.attrib['haltype']
+                haltype = cmd.attrib['haltype'].upper()
                 if haltype not in HALTYPES:
                     perr("Invalid haltype '{}' must be one of {} in {}".format(haltype, str(list(HALTYPES.keys())), lcl))
                     continue
@@ -961,7 +961,7 @@ def handleCommands(commands):
                     pwarn("Attribute 'modbustype' missing in {}. Defaulting to U_AB.".format(lcl))
                     mtype = 'U_AB';
                 else:
-                    mtype = cmd.attrib['modbustype']
+                    mtype = cmd.attrib['modbustype'].upper()
                 if mtype not in MBTYPES:
                     perr("Invalid modbustype '{}' must be one of {} in {}".format(mtype, str(list(MBTYPES.keys())), lcl))
                     continue
