@@ -46,16 +46,18 @@ int hm2_pktuart_parse_md(hostmot2_t *hm2, int md_index)
     if (md->gtag == HM2_GTAG_PKTUART_TX
         && !hm2_md_is_consistent(hm2,md_index, 0, 4, 4, 0x000F)
         && !hm2_md_is_consistent(hm2,md_index, 1, 4, 4, 0x000F)
-        && !hm2_md_is_consistent(hm2,md_index, 2, 4, 4, 0x000F))  {
-        HM2_ERR("Unsupported or inconsistent PktUART TX module (version %i)"
+        && !hm2_md_is_consistent(hm2,md_index, 2, 4, 4, 0x000F)
+        && !hm2_md_is_consistent(hm2,md_index, 3, 4, 4, 0x000F))  {
+        HM2_ERR("Unsupported or inconsistent PktUART TX module (version %i) "
                 "not loading driver\n", md->version);
         return -EINVAL;
     }
     if (md->gtag == HM2_GTAG_PKTUART_RX
         && !hm2_md_is_consistent(hm2, md_index, 0, 4, 4, 0x000F)
         && !hm2_md_is_consistent(hm2, md_index, 1, 4, 4, 0x000F)
-        && !hm2_md_is_consistent(hm2, md_index, 2, 4, 4, 0x000F)) {
-        HM2_ERR("Unsupported or inconsistent PktUART RX module (version %i)"
+        && !hm2_md_is_consistent(hm2, md_index, 2, 4, 4, 0x000F)
+        && !hm2_md_is_consistent(hm2, md_index, 3, 4, 4, 0x000F)) {
+        HM2_ERR("Unsupported or inconsistent PktUART RX module (version %i) "
                 "not loading driver\n", md->version);
         return -EINVAL;
     }
