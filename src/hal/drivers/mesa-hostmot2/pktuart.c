@@ -493,7 +493,7 @@ int hm2_pktuart_config(const char *name, const hm2_pktuart_config_t *rxcfg, cons
             return r;
     }
     if(txcfg) {
-        if((r = config_tx(name, hm2, inst, rxcfg, queue)) < 0)
+        if((r = config_tx(name, hm2, inst, txcfg, queue)) < 0)
             return r;
     }
     return 0;
@@ -951,7 +951,6 @@ int hm2_pktuart_queue_get_frame_sizes(const char *name, rtapi_u32 fsizes[]){
 
     int nfs = (int)((hm2->pktuart.rx_status_reg[inst] >> 16) & 0x1F);
     for (j = 0; j < nfs; j++ ){
-        rtapi_print_msg(RTAPI_MSG_INFO, "j = %i\n", j);
         r = hm2->llio->queue_read(hm2->llio, hm2->pktuart.instance[inst].rx_fifo_count_addr,
                      &fsizes[j], sizeof(rtapi_u32));
         if (r < 0){
