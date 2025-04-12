@@ -140,7 +140,7 @@ other setup values as attributes:
   Default auto.
 * 'stopbits': [1,2]
   Communication number of stopbits. Default 1.
-* 'timeout' [auto,5000..5000000]
+* 'timeout' [auto,10000..10000000]
   The standard time a command may take in micro-seconds (send request plus
   handling plus receive reply) before the command is deemed lost. The special
   value of 'auto' will calculate an appropriate timeout value from the request
@@ -234,6 +234,17 @@ supported because some devices require a read function as a trigger.
 
 Recognized '<initlist>/<command>' attributes:
 
+* 'address': [0..65535]
+  The Modbus coil/input/register address The value can be either decimal or
+  hexadecimal.
+* 'bcanswer': [0,1]
+  Set to 1 if a device sends an answer on broadcast, which must be ignored.
+  Default 0.
+* 'count': [1..2000]/[1..125]
+  Modbus read functions (1, 2, 3 and 4) must specify the number of coils,
+  inputs, registers or inputregs to read. Write functions do not require
+  the 'count' attribute because the '<data>' tags dictate the size of the packet
+  to send.
 * 'delay': [0..60000000]
   Communication will be suspended by 'delay' micro-seconds.
 * 'device':
@@ -241,14 +252,25 @@ Recognized '<initlist>/<command>' attributes:
   references '<device>[name]'.
 * 'function': [see *MODBUS FUNCTIONS*]
   The attribute value is one of the supported Modbus functions.
-* 'address': [0..65535]
-  The Modbus coil/input/register address. The value can be either decimal or
-  hexadecimal.
-* 'count': [1..2000]/[1..125]
-  Modbus read functions (1, 2, 3 and 4) must specify the number of coils,
-  inputs, registers or inputregs to read. Write functions do not require
-  the 'count' attribute because the '<data>' tags dictate the size of the packet
-  to send.
+* 'noanswer': [0,1]
+  Set to 1 if a device does not return a reply to a command. This can be
+  intentional if you send a command to a non-existing device. Default 0.
+* 'timeout': [0..60000000]
+  The override timeout of '<mesamodbus>[timeout]' for this command in
+  *micro-seconds* (send request plus handling plus receive reply) before the
+  command is deemed lost. See also 'timeoutbits' below.
+  Default '<mesamodbus>[timeout]'.
+* 'timeoutbits': [0..1000000]
+  The override timeout of '<mesamodbus>[timeout]' for this command
+  in *bit times* (send request plus handling plus receive reply) before the
+  command is deemed lost. The actual timeout is automatically calculated and
+  scaled by the '<mesamodbus>[baudrate]' setting. See also 'timeout' above.
+  Default '<mesamodbus>[timeout]'.
+* 'timesout': [0,1]
+  Set to 1 if the command is known to (periodically) timeout and no error
+  should be emitted when it does. This differs from 'noanswer' in that a reply
+  may be expected within the timeout period but not after the timeout expires.
+  This may be required for shaky devices. Default 0.
 
 Recognized '<initlist>/<command>/<data>' attributes:
 
@@ -364,6 +386,10 @@ Recognized '<commands>/<command>' attributes:
 * 'modbustype': [see *MODBUS TYPES*]
   The Modbus data mapping from/to register(s) for Modbus functions read/write
   register(s) (3, 4, 6 and 16). The default is U_AB if not specified.
+* 'name':
+  The base name for HAL pin names. If 'count="2"' and 'name="myname"', the the
+  pins will have names like _myname-00_, _myname-01_, unless one or more '<pin>'
+  tags override the name.
 * 'noanswer': [0,1]
   Set to 1 if a device does not return a reply to a command. This can be
   intentional if you send a command to a non-existing device. Default 0.
@@ -387,6 +413,17 @@ Recognized '<commands>/<command>' attributes:
   ** read: pin.name.scaled = ("readvalue" - pin.name.offset) * pin.name.scale
   ** write: "sentvalue" = (pin.name - pin.name.offset) * pin.name.scale
 
+* 'timeout': [0..60000000]
+  The override timeout of '<mesamodbus>[timeout]' for this command in
+  *micro-seconds* (send request plus handling plus receive reply) before the
+  command is deemed lost. See also 'timeoutbits' below.
+  Default '<mesamodbus>[timeout]'.
+* 'timeoutbits': [0..1000000]
+  The override timeout of '<mesamodbus>[timeout]' for this command
+  in *bit times* (send request plus handling plus receive reply) before the
+  command is deemed lost. The actual timeout is automatically calculated and
+  scaled by the '<mesamodbus>[baudrate]' setting. See also 'timeout' above.
+  Default '<mesamodbus>[timeout]'.
 * 'timesout': [0,1]
   Set to 1 if the command is known to (periodically) timeout and no error
   should be emitted when it does. This differs from 'noanswer' in that a reply
