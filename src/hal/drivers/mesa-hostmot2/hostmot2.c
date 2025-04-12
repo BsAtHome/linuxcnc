@@ -1160,6 +1160,7 @@ static void hm2_cleanup(hostmot2_t *hm2) {
     hm2_oneshot_cleanup(hm2);
     hm2_periodm_cleanup(hm2);
     hm2_rcpwmgen_cleanup(hm2);
+    hm2_pktuart_cleanup(hm2);
 
     // free all the tram entries
     hm2_tram_cleanup(hm2);
