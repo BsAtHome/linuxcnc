@@ -32,6 +32,7 @@
 #include "hm2_modbus.h"
 
 #if !defined(__KERNEL__)
+#include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -48,8 +49,10 @@ static inline rtapi_u16 be16_to_cpu(rtapi_u16 v) { return be16toh(v); }
 #endif
 
 // Define to compile in debug messages
-#define DEBUG
-
+//#define DEBUG
+#ifdef DEBUG
+//#define DEBUG_STATE
+#endif
 
 /* module information */
 MODULE_AUTHOR("B.Stultiens");
@@ -139,7 +142,7 @@ static inline unsigned mtypesize(unsigned mtype) {
 
 // State-machine states
 enum {
-	STATE_START,
+	STATE_START = 0,
 	STATE_WAIT_FOR_TIMEOUT,
 	STATE_WAIT_FOR_SEND_BEGIN,
 	STATE_WAIT_FOR_SEND_COMPLETE,
@@ -150,7 +153,25 @@ enum {
 	STATE_WAIT_A_BIT,
 	STATE_WAIT_FOR_RX_CLEAR,
 	STATE_RESET_WAIT,
+	STATE_LAST,
 };
+
+#ifdef DEBUG
+static const char *state_names[] = {
+	"STATE_START",
+	"STATE_WAIT_FOR_TIMEOUT",
+	"STATE_WAIT_FOR_SEND_BEGIN",
+	"STATE_WAIT_FOR_SEND_COMPLETE",
+	"STATE_WAIT_FOR_DATA_FRAME",
+	"STATE_WAIT_FOR_FRAME_SIZES",
+	"STATE_WAIT_FOR_DATA",
+	"STATE_FETCH_MORE_DATA",
+	"STATE_WAIT_A_BIT",
+	"STATE_WAIT_FOR_RX_CLEAR",
+	"STATE_RESET_WAIT",
+	"STATE_LAST",
+};
+#endif
 
 // Overlapping types to handle byte-ordering
 typedef union {
@@ -331,7 +352,7 @@ static int send_modbus_pkt(hm2_modbus_inst_t *inst)
 	ch->data[ch->datalen++] = (checksum >> 8) & 0xff;
 
 #ifdef DEBUG
-	MSG_DBG("Sending to '%s' %i bytes", inst->name, ch->datalen);
+	MSG_DBG("Sending to '%s' %i bytes", inst->uart, ch->datalen);
 	for(int i = 0; i < ch->datalen; i++) MSG_DBG(" 0x%02x", ch->data[i]);
 	MSG_DBG("\n");
 #endif
@@ -351,64 +372,9 @@ static inline void force_resend(hm2_modbus_inst_t *inst)
 }
 
 //
-// Change state in the state machine
-// Performs:
-// - old state exit actions
-// - change state
-// - new state entry actions
-//
-static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
-{
-	// Exit actions
-	switch(inst->state) {
-	}
-
-	inst->state = newstate;	// Switch over
-
-	// Entry actions
-	switch(newstate) {
-	case STATE_RESET_WAIT:
-		// Reset wait uses a different timeout
-		inst->timeout = 25000000;	// 25 milliseconds
-		break;
-	case STATE_START:
-		inst->ignoredata = 0;	// Re-enable data handling
-		/* Fallthrough */
-	default:
-		// Always set the timeout counter on state change
-		inst->timeout = inst->cmds[inst->cmdidx].cmd.timeout * 1000;
-		break;
-	}
-}
-
-//
-// Perform a queued reset.
-// The PktUART RX and TX are cleared and reset in the next period.
-//
-static inline void queue_reset(hm2_modbus_inst_t *inst)
-{
-	hm2_pktuart_queue_reset(inst->uart);
-	set_state(inst, STATE_RESET_WAIT);
-}
-
-static void do_timeout(hm2_modbus_inst_t *inst)
-{
-	if(inst->timeout < 0) {
-		if(hastimesout(&inst->cmds[inst->cmdidx])) {
-			// This command is allowed to time out
-			set_state(inst, STATE_START);
-			return;
-		}
-		MSG_DBG("\n %lu TIMEOUT_RESET %i\n", inst->timeout, inst->state);
-		queue_reset(inst);
-		*(inst->hal->lasterror) = ETIME;
-		*(inst->hal->fault) = 1;
-		*(inst->hal->faultcmd) = inst->cmdidx;
-		force_resend(inst);
-	}
-	MSG_DBG("%lu timeout %i\r", inst->timeout, inst->state);
-}
-
+// Advance to the next command in the list
+// A switch to the normal command list is made when it is the end of initlist.
+// Return 0 on a normal switch. Return 1 when the list repeats.
 static inline int next_command(hm2_modbus_inst_t *inst)
 {
 	// While running the init list
@@ -437,6 +403,75 @@ static inline int next_command(hm2_modbus_inst_t *inst)
 }
 
 //
+// Change state in the state machine
+// Performs:
+// - old state exit actions
+// - change state
+// - new state entry actions
+//
+static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
+{
+#if DEBUG
+	if(newstate < 0 || newstate >= STATE_LAST || inst->state < 0 || inst->state > STATE_LAST) {
+		MSG_ERR("%s: error: Invalid state detected in set_state() state=%d, newstate=%d\n", inst->name, inst->state, newstate);
+		newstate = STATE_START;
+	} else {
+		MSG_DBG("set_state(): %s(%d) => %s(%d)\n", state_names[inst->state], inst->state, state_names[newstate], newstate);
+	}
+#endif
+
+	// Exit actions
+	switch(inst->state) {
+	}
+
+	inst->state = newstate;	// Switch over
+
+	// Entry actions
+	switch(newstate) {
+	case STATE_RESET_WAIT:
+		// Reset wait uses a different timeout
+		inst->timeout = 25000000;	// 25 milliseconds
+		break;
+	case STATE_START:
+		inst->ignoredata = 0;	// Re-enable data handling
+		next_command(inst);
+		/* Fallthrough */
+	default:
+		// Always set the timeout counter on state change
+		inst->timeout = inst->cmds[inst->cmdidx].cmd.timeout * 1000;
+		break;
+	}
+}
+
+//
+// Perform a queued reset.
+// The PktUART RX and TX are cleared and reset in the next period.
+//
+static inline void queue_reset(hm2_modbus_inst_t *inst)
+{
+	hm2_pktuart_queue_reset(inst->uart);
+	set_state(inst, STATE_RESET_WAIT);
+}
+
+static void do_timeout(hm2_modbus_inst_t *inst)
+{
+	if(inst->timeout < 0) {
+		if(hastimesout(&inst->cmds[inst->cmdidx])) {
+			// This command is allowed to time out
+			set_state(inst, STATE_START);
+			return;
+		}
+		MSG_DBG("Timeout reset %s(%d)\n", state_names[inst->state], inst->state);
+		queue_reset(inst);
+		*(inst->hal->lasterror) = ETIME;
+		*(inst->hal->fault) = 1;
+		*(inst->hal->faultcmd) = inst->cmdidx;
+		force_resend(inst);
+		set_state(inst, STATE_START);
+	}
+}
+
+//
 // The main process Modbus state-machine.
 //
 // It is essentially a synchronous communication machine that:
@@ -446,6 +481,11 @@ static inline int next_command(hm2_modbus_inst_t *inst)
 //   d) read and handle reply
 // That way we can assure no wrong replies being attached to a sent command.
 //
+#ifdef DEBUG_STATE
+static rtapi_u32 oldtx;
+static rtapi_u32 oldrx;
+static int oldst = -1;
+#endif
 static void process(void *arg, long period)
 {
 	hm2_modbus_inst_t *inst = (hm2_modbus_inst_t *)arg;
@@ -460,13 +500,13 @@ static void process(void *arg, long period)
 
 	switch(inst->state) {
 	case STATE_START:
-#ifdef DEBUG
+#ifdef DEBUG_STATE
 		{
-			static rtapi_u32 oldtx = 0, oldrx = 0;
-			if(oldrx != rxstatus || oldtx != txstatus) {
+			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
 				MSG_DBG("START txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
 				oldrx = rxstatus;
 				oldtx = txstatus;
+				oldst = inst->state;
 			}
 		}
 #endif
@@ -505,7 +545,12 @@ retry_next_init:
 					// next_command() switches pointers on end of inits.
 					break;
 				}
-				set_state(inst, STATE_WAIT_FOR_SEND_BEGIN);
+				if(hasnoanswer(ch)) {
+					// Just wait a moment (user should set appropriate timeout)
+					set_state(inst, STATE_WAIT_FOR_TIMEOUT);
+				} else {
+					set_state(inst, STATE_WAIT_FOR_SEND_BEGIN);
+				}
 			}
 			break;
 		}
@@ -602,7 +647,16 @@ retry_next_init:
 		break;
 
 	case STATE_WAIT_FOR_TIMEOUT:
-		MSG_DBG("WAIT_FOR_TIMEOUT RX 0x%08x TX 0x%08x\n", txstatus, rxstatus);
+#ifdef DEBUG_STATE
+		{
+			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
+				MSG_DBG("WAIT_FOR_TIMEOUT RX 0x%08x TX 0x%08x\n", txstatus, rxstatus);
+				oldrx = rxstatus;
+				oldtx = txstatus;
+				oldst = inst->state;
+			}
+		}
+#endif
 		// Check for received data
 		// FIXME: This data would be out-of-band. It should never happen,
 		//        unless there is more than one master on the bus.
@@ -617,7 +671,6 @@ retry_next_init:
 
 		if(inst->timeout < 0) {
 			// Timeout of delay, proceed to next command
-			next_command(inst);
 			set_state(inst, STATE_START);
 			*(inst->hal->fault) = 0;
 		}
@@ -625,12 +678,23 @@ retry_next_init:
 
 	case STATE_WAIT_FOR_SEND_BEGIN:
 		// Single cycle delay to allow for queued flush
+		// This should give enough time for the Tx to become busy and maybe
+		// even done again.
 		MSG_DBG("WAIT_FOR_SEND_BEGIN txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
 		set_state(inst, STATE_WAIT_FOR_SEND_COMPLETE);
 		break;
 
 	case STATE_WAIT_FOR_SEND_COMPLETE:
-		MSG_DBG("WAIT_FOR_SEND_COMPLETE txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
+#ifdef DEBUG_STATE
+		{
+			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
+				MSG_DBG("WAIT_FOR_SEND_COMPLETE txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
+				oldrx = rxstatus;
+				oldtx = txstatus;
+				oldst = inst->state;
+			}
+		}
+#endif
 		if(!(txstatus & HM2_PKTUART_TXMODE_TXBUSY)) {
 			const hm2_modbus_cmd_t *cmd = &inst->cmds[inst->cmdidx];
 			if((!cmd->cmd.mbid && !hasbcanswer(cmd)) || (cmd->cmd.mbid && hasnoanswer(cmd))) {
@@ -650,7 +714,16 @@ retry_next_init:
 
 	case STATE_WAIT_FOR_DATA_FRAME:
 wait_for_data_frame:
-		MSG_DBG("WAIT_FOR_DATA_FRAME rxstatus=0x%08x\n", rxstatus);
+#ifdef DEBUG_STATE
+		{
+			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
+				MSG_DBG("WAIT_FOR_DATA_FRAME rxstatus=0x%08x\n", rxstatus);
+				oldrx = rxstatus;
+				oldtx = txstatus;
+				oldst = inst->state;
+			}
+		}
+#endif
 		if(!HM2_PKTUART_RXMODE_NFRAMES_VAL(rxstatus)) {
 			// No data yet, continue waiting.
 			do_timeout(inst);
@@ -703,7 +776,16 @@ wait_for_data_frame:
 
 	case STATE_WAIT_FOR_RX_CLEAR:
 		// FIXME: Do we need to wait here?
-		MSG_DBG("WAIT_FOR_RX_CLEAR rxstatus=0x%08x\r", rxstatus);
+#ifdef DEBUG_STATE
+		{
+			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
+				MSG_DBG("WAIT_FOR_RX_CLEAR rxstatus=0x%08x\r", rxstatus);
+				oldrx = rxstatus;
+				oldtx = txstatus;
+				oldst = inst->state;
+			}
+		}
+#endif
 		if(rxstatus & HM2_PKTUART_RXMODE_HASDATA) {
 			do_timeout(inst);
 			break;
@@ -711,7 +793,6 @@ wait_for_data_frame:
 		MSG_DBG("\n");
 		set_state(inst, STATE_START);
 		*(inst->hal->fault) = 0;
-		next_command(inst);
 		break;
 
 	case STATE_RESET_WAIT:
@@ -1225,41 +1306,24 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 }
 #undef CHK_RV
 
-static int test_bytecount(const hm2_modbus_inst_t *inst, const rtapi_u8 *bytes, unsigned pkt_len, unsigned mtype)
+static int test_bytecount(const hm2_modbus_inst_t *inst, const rtapi_u8 *bytes, unsigned pkt_len, unsigned mini, unsigned maxi)
 {
-	// The byte count cannot be zero and there is a hard limit on
-	// coils/inputs/registers read in one pass.
-	// 2000 bits  : n = 125 bytes (commands 1 and 2)
-	//  125 words : n = 250 bytes (commands 3 and 4)
-	//   62 dwords: n = 248 bytes (commands 3 and 4)
-	//   31 qwords: n = 248 bytes (commands 3 and 4)
-	unsigned mini, maxi;
-	if(mtypeiscompound(mtype)) {	// Compound types are multiple of 2/4/8 bytes (1/2/4 regs)
-		mini = 2 * mtypesize(mtype);
-		maxi = 248;	// 4 * 62 == 8 * 31
-	} else if(mtypetype(mtype) == HAL_BIT) {
-		mini = 1;	// Any count allowed
-		maxi = 125;	// 2000 / 8
-	} else {
-		mini = 2;	// Only even counts
-		maxi = 250;	// 2 * 125
-	}
 	if(bytes[2] < mini || bytes[2] > maxi) {
 		MSG_ERR("%s: error: Invalid byte count %u in received PDU not in [%u, %u], cmd %u\n", inst->name, bytes[2], mini, maxi, bytes[1]);
 		return -1;
 	}
 	// Byte count cannot be odd with words.
-	if(0 != bytes[2] % mini) {
+	if(mini > 1 && 0 != bytes[2] % mini) {
 		MSG_ERR("%s: error: Invalid odd byte count %u in received PDU, expected mod %u, cmd %u\n", inst->name, bytes[2], mini, bytes[1]);
 		return -1;
 	}
 	// The byte count must match the PDU's content size.
-	// The -4 is subtracting the mbid, function code and CRC.
-	if(bytes[2] > pkt_len - 4) {
+	// The -5 is subtracting the mbid, function code, CRC and the byte count byte.
+	if(bytes[2] > pkt_len - 5) {
 		MSG_ERR("%s: error: Byte count in received PDU too large (%u > %u), cmd %u\n", inst->name, bytes[2], pkt_len - 4, bytes[1]);
 		return -1;
 	}
-	if(bytes[2] < pkt_len - 4) {
+	if(bytes[2] < pkt_len - 5) {
 		MSG_ERR("%s: error: Byte count in received PDU too small (%u < %u), cmd %u\n", inst->name, bytes[2], pkt_len - 4, bytes[1]);
 		return -1;
 	}
@@ -1380,7 +1444,8 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	unsigned rxcount = HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]);
 	int w = 0;
 	int b = 0;
-	int p;
+	int p = ch->pinref;
+
 	rtapi_u8 bytes[MAX_PKT_LEN] = {};
 	rtapi_u16 checksum;
 	mb_types32_u val32 = {};
@@ -1430,12 +1495,13 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		return -1;
 	}
 
-	p = ch->pinref;
-
 	switch(bytes[1]) {
 	case MBCMD_R_COILS: // read coils
 	case MBCMD_R_INPUTS: // read inputs
-		if(test_bytecount(inst, bytes, rxcount, ch->cmd.mtype) < 0) {
+		// The byte count cannot be zero and there is a hard limit on
+		// coils/inputs/registers read in one pass.
+		// 2000 bits  : n = 125 bytes (commands 1 and 2)
+		if(test_bytecount(inst, bytes, rxcount, 1, 125) < 0) {
 			force_resend(inst);
 			break;
 		}
@@ -1454,10 +1520,22 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 			break;
 		}
 
-		if(test_bytecount(inst, bytes, rxcount, ch->cmd.mtype) < 0) {
+		// The byte count cannot be zero and there is a hard limit on
+		// coils/inputs/registers read in one pass.
+		//  125 words : n = 250 bytes (commands 3 and 4)
+		//   62 dwords: n = 248 bytes (commands 3 and 4)
+		//   31 qwords: n = 248 bytes (commands 3 and 4)
+		switch(mtypesize(ch->cmd.mtype)) {
+		default:
+		case 1: w = 250; break;
+		case 2: w = 248; break;
+		case 4: w = 248; break;
+		}
+		if(test_bytecount(inst, bytes, rxcount, 2, w) < 0) {
 			force_resend(inst);
 			break;
 		}
+
 		w = 3;
 		for(int i = 0; i < bytes[2] / 2;) {
 			// Read bytes according to the size of the mtype
@@ -1619,9 +1697,9 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	case (128 + MBCMD_W_REGISTERS):	// 16 + error bit
 		force_resend(inst);
 		if(bytes[2] >= (sizeof(error_codes) / sizeof(*error_codes))) {
-			MSG_ERR("%s: error: Modbus error response function %u with invalid/unknown error code %u\n", inst->name, bytes[1], bytes[2]);
+			MSG_ERR("%s: error: Modbus error response cmd %u function %u with invalid/unknown error code %u\n", inst->name, inst->cmdidx, bytes[1] & 0x7f, bytes[2]);
 		} else {
-			MSG_ERR("%s: error: Modbus error response function %u error '%s' (%u)\n", inst->name, bytes[1], error_codes[bytes[2]], bytes[2]);
+			MSG_ERR("%s: error: Modbus error response cmd %u function %u error '%s' (%u)\n", inst->name, inst->cmdidx, bytes[1] & 0x7f, error_codes[bytes[2]], bytes[2]);
 		}
 		return -1;
 	default:
@@ -1931,7 +2009,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 			MSG_WARN("%s: warning: Mbccb init %u has extra flags set (flags=0x%04x, allowed=0x%04x)\n",
 						inst->name, i, initptr[i].flags, MBCCB_CMDF_MASK);
 		}
-		initptr[i].flags &= ~MBCCB_CMDF_MASK;
+		initptr[i].flags &= MBCCB_CMDF_MASK;
 		if(initptr[i].flags & ~MBCCB_CMDF_INITMASK) {
 			MSG_ERR("%s: error: Mbccb init %u has invalid flags set (flags=0x%04x, allowed=0x%04x)\n",
 						inst->name, i, initptr[i].flags, MBCCB_CMDF_INITMASK);
@@ -2008,7 +2086,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 			MSG_WARN("%s: warning: Mbccb cmds %u has extra flags set (flags=0x%04x, allowed=0x%04x)\n",
 						inst->name, c, cmdsptr[c].flags, MBCCB_CMDF_MASK);
 		}
-		cmdsptr[c].flags &= ~MBCCB_CMDF_MASK;
+		cmdsptr[c].flags &= MBCCB_CMDF_MASK;
 
 		// Can never be more than MAXDELAY
 		if(cmdsptr[c].timeout > MAXDELAY) {
@@ -2239,6 +2317,9 @@ int rtapi_app_main(void)
 			inst->_cmds[i].cmd = inst->cmdsptr[i];
 		}
 
+		// Setup to start sending init packets
+		inst->cmds = inst->_init;
+
 		// Export the HAL process function
 		if((retval = hal_export_functf(process, inst, 1, 0, comp_id, COMP_NAME".%d.process", i)) < 0) {
 			MSG_ERR("%s: error: Function export failed\n", inst->name);
@@ -2247,7 +2328,6 @@ int rtapi_app_main(void)
 
 #define CHECK(x) do { \
 					retval = (x); \
-					MSG_DBG("%s: check %d\n", inst->name, retval); \
 					if(retval < 0) { \
 						MSG_ERR("%s: error: Failed to create pin or parameter\n", inst->name); \
 						goto errout; \

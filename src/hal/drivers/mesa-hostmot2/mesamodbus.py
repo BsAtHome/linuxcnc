@@ -132,7 +132,7 @@ CONFIGLIMITS = {'baudrate'  : [1200, 1000000],
                 'txdelay'   : [17, 1020],
                 'drivedelay': [0, 31],
                 'interval'  : [0, 1000000000],  # As-fast-as possible to 1000 seconds
-                'timeout'   : [5000, 5000000] } # 5 milliseconds to 5 seconds (can override in <command>)
+                'timeout'   : [10000, 10000000] } # 10 milliseconds to 10 seconds (can override in <command>)
 
 # XXX: Keep in sync with hal.h
 HAL_BIT = 1
@@ -273,7 +273,8 @@ BITFUNCTIONS = [R_COILS, R_INPUTS, W_COIL, W_COILS]
 
 
 # XXX: keep in sync with hm2_modbus.h
-MAXDELAY = 60000000    # Max one minute delay between init commands (in microseconds)
+MAXDELAY = 60000000    # Max one minute delay between commands (in microseconds)
+MAXDELAYBITS = 1000000 # Max one Mega bit-times delay
 MAXPINNAME = 24        # Max chars for a name
 
 # Command flags for handling quirks and options
@@ -286,6 +287,23 @@ MBCCB_CMDF_CLAMP    = 0x0010
 MBCCB_CMDF_RESEND   = 0x0020
 MBCCB_CMDF_INITMASK = 0x0007 # sum of allowed flags in init
 MBCCB_CMDF_MASK     = 0x003f # sum of all above flags
+
+# Allowed attributes in <commands>/<command>
+CMDSATTRIB = [ 'address',    'bcanswer', 'clamp',       'count',
+               'delay',      'device',   'function',    'haltype',
+               'modbustype', 'name',     'noanswer',    'resend',
+               'scale',      'timeout',  'timeoutbits', 'timesout' ]
+
+# Allowed attributes in <commands>/<command>/<pin>
+PINSATTRIB = [ 'name' ]
+
+# Allowed attributes in <initlist>/<command>
+INITATTRIB = [ 'address',     'bcanswer', 'count',    'delay',
+               'device',      'function', 'noanswer', 'timeout',
+               'timeoutbits', 'timesout' ]
+
+# Allowed attributes in <initlist>/<command>/<data>
+DATAATTRIB = [ 'modbustype', 'value' ]
 
 #
 # Program invocation message
@@ -593,6 +611,14 @@ def calcTimeout(function, count, mtype):
     return int((2 * bits * 1000000.0 + configparams['baudrate'] - 1) / configparams['baudrate']) + 2*8000
 
 #
+# Check the allowed attributes for a tag
+#
+def checkAttribs(have, may, suffix):
+    bad = list(set(have) - set(may))
+    for a in bad:
+        pwarn("Unrecognized attribute '{}' in {}".format(a, suffix))
+
+#
 # Parse the <initlist> tag content
 #
 def handleInits(inits):
@@ -602,6 +628,9 @@ def handleInits(inits):
         if cmd.tag != 'command':
             perr("Expected <command> tag as child of {}".format(lil))
             continue
+
+        checkAttribs(cmd.attrib, INITATTRIB, lil)
+
         if 'delay' in cmd.attrib:
             # A delay between init commands
             delay = checkInt(cmd.attrib, 'delay')
@@ -638,8 +667,15 @@ def handleInits(inits):
                 if timeout < 0 or timeout > MAXDELAY:
                     perr("Attribute 'timeout' out of range [0..{}] {}".format(MAXDELAY, lil))
                     continue
+                if 'timeoutbits' in cmd.attrib:
+                    pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(lil))
+            elif 'timeoutbits' in cmd.attrib:
+                tob = checkInt(cmd.attrib, 'timeoutbits')
+                if tob < 0 or tob > MAXDELAYBITS:
+                    perr("Attribute 'timeoutbits' out of range [0..{}] {}".format(MAXDELAYBITS, lil))
+                    continue
+                timeout = math.ceil(tob * 1000000.0 / configparams['baudrate'])
             else:
-                global configparams
                 timeout = configparams['timeout']   # Use global timeout
 
             # Must have a function
@@ -672,6 +708,9 @@ def handleInits(inits):
                     perr("Expected <data> tag instead of '{}' as child in {}".format(data.tag, lil))
                     err = True
                     break
+
+                checkAttribs(data.attrib, DATAATTRIB, ldl)
+
                 # Write function must have data
                 if FUNCNAMES[function] not in WRITEFUNCTIONS:
                     perr("Only write function can have <data> tag(s) in {}".format(data.tag, lil))
@@ -877,6 +916,8 @@ def handleCommands(commands):
             perr("Expected <command> tag as child of <commands>")
             continue
 
+        checkAttribs(cmd.attrib, CMDSATTRIB, lcl)
+
         if 'delay' in cmd.attrib:
             # A delay between commands
             delay = checkInt(cmd.attrib, 'delay')
@@ -903,8 +944,15 @@ def handleCommands(commands):
                 if timeout < 0 or timeout > MAXDELAY:
                     perr("Attribute 'timeout' out of range [0..{}] {}".format(MAXDELAY, lil))
                     continue
+                if 'timeoutbits' in cmd.attrib:
+                    pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(lil))
+            elif 'timeoutbits' in cmd.attrib:
+                tob = checkInt(cmd.attrib, 'timeoutbits')
+                if tob < 0 or tob > MAXDELAYBITS:
+                    perr("Attribute 'timeoutbits' out of range [0..{}] {}".format(MAXDELAYBITS, lil))
+                    continue
+                timeout = math.ceil(tob * 1000000.0 / configparams['baudrate'])
             else:
-                global configparams
                 timeout = configparams['timeout']   # Use global timeout
 
             # Must have a target address
@@ -1010,6 +1058,9 @@ def handleCommands(commands):
                     perr("Expected <pin> tag {}".format(lcl))
                     err = True
                     break
+
+                checkAttribs(pin.attrib, PINSATTRIB, lpl)
+
                 if 'name' not in pin.attrib:
                     perr("Attribute 'name' missing in {}".format(lpl))
                     err = True
@@ -1161,7 +1212,10 @@ def main():
             print("  interval  : 0 (as fast as possible)".format(configparams['interval']))
         else:
             print("  interval  : {} microseconds".format(configparams['interval']))
-        #print("  timeout   : {} microseconds".format(configparams['timeout']))
+        if configparams['timeout'] > 0:
+            print("  timeout   : {} microseconds".format(configparams['timeout']))
+        else:
+            print("  timeout   : auto".format(configparams['timeout']))
 
     # Parse the nodes
     global devices
