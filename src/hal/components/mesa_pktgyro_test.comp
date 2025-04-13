@@ -171,8 +171,6 @@ EXTRA_SETUP(){ // the names parameters are passed in 'prefix'.
 	hm2_pktuart_config_t cfgrx = {
 		.baudrate = BAUDRATE,
 		.filterrate = 0,
-		.parity = 0,
-		.stopbits = 0,
 		.drivedelay = 0,
 		.ifdelay = 127,
 		.flags = HM2_PKTUART_CONFIG_FLUSH
@@ -180,8 +178,6 @@ EXTRA_SETUP(){ // the names parameters are passed in 'prefix'.
 	hm2_pktuart_config_t cfgtx = {
 		.baudrate = BAUDRATE,
 		.filterrate = 0,
-		.parity = 0,
-		.stopbits = 0,
 		.drivedelay = 0,
 		.ifdelay = 255,
 		.flags = HM2_PKTUART_CONFIG_DRIVEAUTO | HM2_PKTUART_CONFIG_FLUSH

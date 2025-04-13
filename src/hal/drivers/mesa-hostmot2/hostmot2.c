@@ -160,6 +160,7 @@ static void hm2_write(void *void_hm2, long period) {
     hm2_oneshot_write(hm2);   // update oneshot registers if needed
     hm2_periodm_write(hm2);   // update periodm registers if needed
     hm2_rcpwmgen_write(hm2);  // update rcpwmgen registers if needed
+    hm2_pktuart_write(hm2);   // update pktuart registers if needed
     hm2_inmux_write(hm2);     // update inmux control register if needed
     hm2_inm_write(hm2);       // update inm control register if needed
     hm2_xy2mod_write(hm2);    // update xy2mod motion registers if needed
@@ -1188,6 +1189,7 @@ void hm2_print_modules(hostmot2_t *hm2) {
     hm2_inm_print_module(hm2);
     hm2_xy2mod_print_module(hm2);
     hm2_rcpwmgen_print_module(hm2);
+    hm2_pktuart_print_module(hm2);
 }
 
 
