@@ -15,14 +15,14 @@
 #define MBCCB_FORMAT_PARITY_EVEN      2
 
 #define MBCCB_FORMAT_PARITY_BIT       0 // bits 0..1  00=8Nx 01=8Ox 10=8Ex 11=invalid
-#define MBCCB_FORMAT_STOPBITS_BIT     2 // bit  2     0=8x1 1=8x2
+#define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2     0=8x1 1=8x2
 #define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3     Set for full-duplex (rx-mask off)
 #define MBCCB_FORMAT_IFSCALE_BIT      7 // bit  7     Inter-frame delay scale 0=1x, 1=4x
 #define MBCCB_FORMAT_PARITY_MASK     (3u << MBCCB_FORMAT_PARITY_BIT)
 #define MBCCB_FORMAT_PARITY(x)       (((x) & 3u) << MBCCB_FORMAT_PARITY_BIT)
 #define MBCCB_FORMAT_PARITY_VAL(x)   (((x) >> MBCCB_FORMAT_PARITY_BIT) & 3u)
-#define MBCCB_FORMAT_STOPBITS        (1u << MBCCB_FORMAT_STOPBITS_BIT)
-#define MBCCB_FORMAT_STOPBITS_VAL(x) (((x) >> MBCCB_FORMAT_STOPBITS_BIT) & 1u)
+#define MBCCB_FORMAT_STOPBITS2        (1u << MBCCB_FORMAT_STOPBITS2_BIT)
+#define MBCCB_FORMAT_STOPBITS2_VAL(x) (((x) >> MBCCB_FORMAT_STOPBITS2_BIT) & 1u)
 #define MBCCB_FORMAT_IFSCALE         (1u << MBCCB_FORMAT_IFSCALE_BIT)
 #define MBCCB_FORMAT_IFSCALE_VAL(x)  (((x) >> MBCCB_FORMAT_IFSCALE_BIT) & 1u)
 #define MBCCB_FORMAT_DUPLEX          (1u << MBCCB_FORMAT_IFSCALE_BIT)

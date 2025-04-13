@@ -214,6 +214,7 @@ typedef struct {
 	hm2_modbus_mbccb_cmds_t cmd;	// In host order
 	int pinref;		// What pin to start with
 	int disabled;	// Skipped if set
+	int errors;		// Count the errors
 	int datalen;	// Number of bytes in 'data' buffer
 	rtapi_u8 data[MAX_PKT_LEN]; // PDU: 2-byte header, MAX_MSG_LEN payload, 2-byte CRC
 } hm2_modbus_cmd_t;
@@ -334,6 +335,12 @@ static int do_setup(hm2_modbus_inst_t *inst, int queue)
 	return 1;
 }
 
+static inline void set_error(hm2_modbus_cmd_t *ch)
+{
+	if(++ch->errors > 3)
+		ch->disabled = 1;
+}
+
 static int send_modbus_pkt(hm2_modbus_inst_t *inst)
 {
 	hm2_modbus_cmd_t *ch = &(inst->cmds[inst->cmdidx]);
@@ -411,7 +418,7 @@ static inline int next_command(hm2_modbus_inst_t *inst)
 //
 static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 {
-#if DEBUG
+#ifdef DEBUG
 	if(newstate < 0 || newstate >= STATE_LAST || inst->state < 0 || inst->state > STATE_LAST) {
 		MSG_ERR("%s: error: Invalid state detected in set_state() state=%d, newstate=%d\n", inst->name, inst->state, newstate);
 		newstate = STATE_START;
@@ -467,6 +474,7 @@ static void do_timeout(hm2_modbus_inst_t *inst)
 		*(inst->hal->fault) = 1;
 		*(inst->hal->faultcmd) = inst->cmdidx;
 		force_resend(inst);
+		set_error(&inst->cmds[inst->cmdidx]);
 		set_state(inst, STATE_START);
 	}
 }
@@ -536,6 +544,7 @@ retry_next_init:
 				memcpy(ch->data, dptr + 1, *dptr);	// Packet is prepared as data
 				ch->datalen = *dptr;
 				if((r = send_modbus_pkt(inst)) < 0) {	// This will attach CRC
+					set_error(ch);
 					// Failure means we just move to the next
 					MSG_ERR("%s: error: Failed to send init command %u\n", inst->name, inst->cmdidx);
 					if(!next_command(inst))	// Until we wrap the command list
@@ -615,6 +624,7 @@ retry_next_init:
 				// the command is our only option.
 				MSG_ERR("%s: error: Build data frame failed ccommand %d, disabling\n", inst->name, inst->cmdidx);
 				inst->cmds[inst->cmdidx].disabled = 1;
+				inst->cmds[inst->cmdidx].errors++;
 				continue; // Just try next command
 			}
 			if(r || hasresend(&inst->cmds[inst->cmdidx])) { // if data has changed or forced
@@ -629,6 +639,7 @@ retry_next_init:
 						// the application, but that should be OK.
 						MSG_ERR("%s: error: Command %d disabled\n", inst->name, inst->cmdidx);
 						inst->cmds[inst->cmdidx].disabled = 1;
+						inst->cmds[inst->cmdidx].errors++;
 						continue; // Just try next command
 					}
 					MSG_ERR("%s: error: Send PDU failed (error %d) command %d, resetting\n", inst->name, r, inst->cmdidx);
@@ -1453,6 +1464,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 
 	if(rxcount > sizeof(bytes)) {
 		MSG_ERR("%s: error: Received PDU larger than buffer (%u > %zu), truncating\n", inst->name, rxcount, sizeof(bytes));
+		set_error(ch);
 		rxcount = sizeof(bytes);
 	}
 
@@ -1463,6 +1475,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	// 2 bytes CRC
 	if(rxcount < 5) {
 		MSG_ERR("%s: error: Received PDU too small, size=%u\n", inst->name, rxcount);
+		set_error(ch);
 		force_resend(inst);
 		return -1;
 	}
@@ -1483,6 +1496,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 
 	if((bytes[1] & 0x7f ) != ch->cmd.func) {
 		MSG_ERR("%s: error: Call/response function number mismatch: got 0x%02x, expected 0x%02x)\n", inst->name, ch->cmd.func, bytes[1]);
+		set_error(ch);
 		force_resend(inst);
 		return -1;
 	}
@@ -1491,6 +1505,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	rtapi_u16 retcrc = ((rtapi_u16)bytes[rxcount - 1] << 8) | bytes[rxcount - 2];
 	if(retcrc != checksum) {
 		MSG_ERR("%s: error: Modbus checksum error: got 0x%04x, expected 0x%04x\n", inst->name, retcrc, checksum);
+		set_error(ch);
 		force_resend(inst);
 		return -1;
 	}
@@ -1696,6 +1711,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	case (128 + MBCMD_W_COILS):		// 15 + error bit
 	case (128 + MBCMD_W_REGISTERS):	// 16 + error bit
 		force_resend(inst);
+		set_error(ch);
 		if(bytes[2] >= (sizeof(error_codes) / sizeof(*error_codes))) {
 			MSG_ERR("%s: error: Modbus error response cmd %u function %u with invalid/unknown error code %u\n", inst->name, inst->cmdidx, bytes[1] & 0x7f, bytes[2]);
 		} else {
@@ -1704,6 +1720,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		return -1;
 	default:
 		MSG_ERR("%s: error: Unknown or unsupported Modbus function code: 0x%02x (mbid=%u, cmd=%u)\n", inst->name, bytes[1], bytes[0], inst->cmdidx);
+		set_error(ch);
 		return -1;
 	}
 	return 0;
@@ -2347,8 +2364,22 @@ int rtapi_app_main(void)
 
 		inst->hal->interval = inst->mbccb->interval;
 		inst->hal->baudrate = inst->cfg_rx.baudrate = inst->cfg_tx.baudrate = inst->mbccb->baudrate;
-		inst->hal->parity   = inst->cfg_rx.parity   = inst->cfg_tx.parity   = MBCCB_FORMAT_PARITY_VAL(inst->mbccb->format);
-		inst->hal->stopbits = inst->cfg_rx.stopbits = inst->cfg_tx.stopbits = MBCCB_FORMAT_STOPBITS_VAL(inst->mbccb->format);
+		unsigned parity = MBCCB_FORMAT_PARITY_VAL(inst->mbccb->format);
+		if(parity != 0) {
+			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
+			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
+		}
+		if(parity == 1) {
+			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
+			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
+		}
+		unsigned stopbits = MBCCB_FORMAT_STOPBITS2_VAL(inst->mbccb->format);
+		if(stopbits) {
+			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
+			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
+		}
+		inst->hal->parity   = parity;
+		inst->hal->stopbits = stopbits ? 2 : 1;
 		// The following three will be copied to the instance in do_setup()
 		inst->hal->rxdelay  = inst->mbccb->rxdelay;
 		inst->hal->txdelay  = inst->mbccb->txdelay;
@@ -2366,17 +2397,14 @@ int rtapi_app_main(void)
 		MSG_DBG("%s: inst->ninit    : %u\n", inst->name, inst->ninit);
 		MSG_DBG("%s: inst->ncmds    : %u\n", inst->name, inst->ncmds);
 		MSG_DBG("%s: inst->npins    : %u\n", inst->name, inst->npins);
-		MSG_DBG("%s: inst->baudrate : %u\n", inst->name, inst->cfg_rx.baudrate);
-		MSG_DBG("%s: inst->parity   : %u\n", inst->name, inst->cfg_rx.parity);
-		MSG_DBG("%s: inst->stopbits : %u\n", inst->name, inst->cfg_rx.stopbits);
 		MSG_DBG("%s: inst->mbccb->txdelay  : %u\n", inst->name, inst->mbccb->txdelay);
 		MSG_DBG("%s: inst->mbccb->rxdelay  : %u\n", inst->name, inst->mbccb->rxdelay);
 		MSG_DBG("%s: inst->mbccb->drvdelay : %u\n", inst->name, inst->mbccb->drvdelay);
 
 		MSG_INFO("%s: PktUART serial configured to 8%c%c@%d\n",
 					inst->name,
-					inst->cfg_rx.parity ? (inst->cfg_rx.parity == 1 ? 'O' : 'E') : 'N',
-					inst->cfg_rx.stopbits ? '2' : '1',
+					parity ? (parity == 1 ? 'O' : 'E') : 'N',
+					stopbits ? '2' : '1',
 					inst->cfg_rx.baudrate);
 
 		*(inst->hal->fault)     = 0;

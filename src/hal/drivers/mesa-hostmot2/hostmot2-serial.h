@@ -1,5 +1,6 @@
 //
 //    Copyright (C) 2007-2008 Sebastian Kuzminsky
+//    Copyright (C) 2015 B.Stultiens
 //
 //    This program is free software; you can redistribute it and/or modify
 //    it under the terms of the GNU General Public License as published by
@@ -42,7 +43,7 @@
 #define HM2_PKTUART_TXMODE_MASK              ((1u << 22) - 1)
 #define HM2_PKTUART_TXMODE_HASDATA_BIT       21  // RO
 #define HM2_PKTUART_TXMODE_IFSCALE_BIT       20  // WO (v3+)
-#define HM2_PKTUART_TXMODE_STOPBITS_BIT      19  // WO (v3+)
+#define HM2_PKTUART_TXMODE_STOPBITS2_BIT     19  // WO (v3+)
 #define HM2_PKTUART_TXMODE_PARITYODD_BIT     18  // WO
 #define HM2_PKTUART_TXMODE_PARITYEN_BIT      17  // WO
 #define HM2_PKTUART_TXMODE_NFRAMES_BIT       16  // RO (16..20)
@@ -54,7 +55,7 @@
 #define HM2_PKTUART_TXMODE_DRIVEENDLY_BIT     0  // RW ( 0..3)
 #define HM2_PKTUART_TXMODE_HASDATA           (1u << HM2_PKTUART_TXMODE_HASDATA_BIT)
 #define HM2_PKTUART_TXMODE_IFSCALE           (1u << HM2_PKTUART_TXMODE_IFSCALE_BIT)
-#define HM2_PKTUART_TXMODE_STOPBITS          (1u << HM2_PKTUART_TXMODE_STOPBITS_BIT)
+#define HM2_PKTUART_TXMODE_STOPBITS2         (1u << HM2_PKTUART_TXMODE_STOPBITS2_BIT)
 #define HM2_PKTUART_TXMODE_NFRAMES_MASK      (0x1fu << HM2_PKTUART_TXMODE_NFRAMES_BIT)
 #define HM2_PKTUART_TXMODE_NFRAMES(x)        (((x) & 0x1fu) << HM2_PKTUART_TXMODE_NFRAMES_BIT)
 #define HM2_PKTUART_TXMODE_NFRAMES_VAL(x)    (((x) >> HM2_PKTUART_TXMODE_NFRAMES_BIT) & 0x1fu)
@@ -100,7 +101,7 @@
 #define HM2_PKTUART_RXMODE_RXFILTER_BIT      22  // RW (22..29)
 #define HM2_PKTUART_RXMODE_HASDATA_BIT       21  // RO
 #define HM2_PKTUART_RXMODE_IFSCALE_BIT       20  // WO (v3+)
-#define HM2_PKTUART_RXMODE_STOPBITS_BIT      19  // WO (v3+)
+#define HM2_PKTUART_RXMODE_STOPBITS2_BIT     19  // WO (v3+)
 #define HM2_PKTUART_RXMODE_PARITYODD_BIT     18  // WO
 #define HM2_PKTUART_RXMODE_PARITYEN_BIT      17  // WO
 #define HM2_PKTUART_RXMODE_NFRAMES_BIT       16  // RO (16..20)
@@ -119,7 +120,7 @@
 #define HM2_PKTUART_RXMODE_RXFILTER_VAL(x)    (((x) >> HM2_PKTUART_RXMODE_RXFILTER_BIT) & 0xffu)
 #define HM2_PKTUART_RXMODE_HASDATA            (1u << HM2_PKTUART_RXMODE_HASDATA_BIT)
 #define HM2_PKTUART_RXMODE_IFSCALE            (1u << HM2_PKTUART_RXMODE_IFSCALE_BIT)
-#define HM2_PKTUART_RXMODE_STOPBITS           (1u << HM2_PKTUART_RXMODE_STOPBITS_BIT)
+#define HM2_PKTUART_RXMODE_STOPBITS2          (1u << HM2_PKTUART_RXMODE_STOPBITS2_BIT)
 #define HM2_PKTUART_RXMODE_NFRAMES_MASK       (0x1fu << HM2_PKTUART_RXMODE_NFRAMES_BIT)
 #define HM2_PKTUART_RXMODE_NFRAMES(x)         (((x) & 0x1fu) << HM2_PKTUART_RXMODE_NFRAMES_BIT)
 #define HM2_PKTUART_RXMODE_NFRAMES_VAL(x)     (((x) >> HM2_PKTUART_RXMODE_NFRAMES_BIT) & 0x1fu)
@@ -163,25 +164,21 @@ RTAPI_BEGIN_DECLS
 typedef struct {
     rtapi_u32 baudrate;   // RX+TX
     rtapi_u32 filterrate; // RX only: (set to zero for 2*baudrate)
-    rtapi_u8  parity;     // RX+TX: 0=none, 1=odd, 2=even
-    rtapi_u8  stopbits;   // RX+TX: 0=one, 1=two (V3+ only)
-    rtapi_u8  drivedelay; // TX only: delay before transmit ([0..31])
-    rtapi_u8  unused;     //
-    rtapi_u16 ifdelay;    // RX+TX: Inter-frame delay in bit times ([0..255])
-    rtapi_u16 flags;      // RX+TX: enable flags (see HM2_PKTUART_CONFIG_*)
+    rtapi_u32 drivedelay; // TX only: delay before transmit ([0..31])
+    rtapi_u32 ifdelay;    // RX+TX: Inter-frame delay in bit times ([0..255] or V3+ [0..1020])
+    rtapi_u32 flags;      // RX+TX: enable flags (see HM2_PKTUART_CONFIG_*)
 } hm2_pktuart_config_t;
 
 #define HM2_PKTUART_CONFIG_DRIVEEN	0x0001	// TX flag
 #define HM2_PKTUART_CONFIG_DRIVEAUTO	0x0002	// TX flag
 #define HM2_PKTUART_CONFIG_RXEN		0x0004	// RX flag
 #define HM2_PKTUART_CONFIG_RXMASKEN	0x0008	// RX flag
-#define HM2_PKTUART_CONFIG_IFSCALE	0x0010	// RX+TX flag Will use x4 scale of ifdelay (V3+)
-#define HM2_PKTUART_CONFIG_FLUSH	0x0100	// RX+TX flag (flush fifo and count regs)
-#define HM2_PKTUART_CONFIG_NOMODE	0x1000	// RX+TX don't set the mode
-#define HM2_PKTUART_CONFIG_NOBAUDRATE	0x2000	// RX+TX don't set the baudrate
-#define HM2_PKTUART_CONFIG_BITRATEVAL	0x4000	// RX+TX baudrate is raw bitrate config
+#define HM2_PKTUART_CONFIG_IFSCALE	0x0010	// RX+TX Will use x4 scale of ifdelay (V3+)
+#define HM2_PKTUART_CONFIG_PARITYEN	0x0020	// RX+TX Parity enable
+#define HM2_PKTUART_CONFIG_PARITYODD	0x0040	// RX+TX Parity Odd (even when unset and parity enabled)
+#define HM2_PKTUART_CONFIG_STOPBITS2	0x0080	// RX+TX Set two stopbits (V3+)
+#define HM2_PKTUART_CONFIG_FLUSH	0x4000	// RX+TX flag (flush fifo and count regs)
 #define HM2_PKTUART_CONFIG_FORCECONFIG	0x8000	// Always write the config to the board, even when not changed
-// Note: ..._FORCECONFIG does honor the ..._NOMODE and ..._NOBAUDRATE flags.
 
 // hm2_pktuart_config() replaces previous pktuart serial setup functions
 // Changes can now be done without changing the prototype
