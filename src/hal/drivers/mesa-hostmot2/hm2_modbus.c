@@ -192,9 +192,9 @@ typedef union {
 
 typedef struct {
 	hal_data_u **pins;	// All Modbus data pins
-	hal_data_u **scales;	// All HAL pin scales (always HAL_FLOAT)
+	hal_float_t **scales;	// All HAL pin scales
 	hal_data_u **offsets;	// All HAL pin offsets
-	hal_data_u **scaleds;	// All HAL pin scaled outputs (always HAL_FLOAT)
+	hal_float_t **scaleds;	// All HAL pin scaled outputs
 	hal_bit_t *fault;
 	hal_u32_t *faultcmd;
 	hal_u32_t *lasterror;
@@ -1175,7 +1175,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 				case MBT_F: map_f(ch, map_sf(hal->pins[p]->s)); break;
 				}
 			} else {
-				val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * hal->scales[p]->f;
+				val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * *(hal->scales[p]);
 				switch(mtypetype(ch->cmd.mtype)) {
 				case MBT_U: map_u(ch, map_fu(val64.f)); break;
 				case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1191,7 +1191,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 				case MBT_F: map_f(ch, map_sf(hal->pins[p]->ls)); break;
 				}
 			} else {
-				val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * hal->scales[p]->f;
+				val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * *(hal->scales[p]);
 				switch(mtypetype(ch->cmd.mtype)) {
 				case MBT_U: map_u(ch, map_fu(val64.f)); break;
 				case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1207,7 +1207,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 				case MBT_F: map_f(ch, hal->pins[p]->f); break;
 				}
 			} else {
-				val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * hal->scales[p]->f;
+				val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * *(hal->scales[p]);
 				switch(mtypetype(ch->cmd.mtype)) {
 				case MBT_U: map_u(ch, map_fu(val64.f)); break;
 				case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1262,7 +1262,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 					case MBT_F: map_f(ch, map_sf(hal->pins[p]->s)); break;
 					}
 				} else {
-					val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * hal->scales[p]->f;
+					val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * *(hal->scales[p]);
 					switch(mtypetype(ch->cmd.mtype)) {
 					case MBT_U: map_u(ch, map_fu(val64.f)); break;
 					case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1278,7 +1278,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 					case MBT_F: map_f(ch, map_sf(hal->pins[p]->ls)); break;
 					}
 				} else {
-					val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * hal->scales[p]->f;
+					val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * *(hal->scales[p]);
 					switch(mtypetype(ch->cmd.mtype)) {
 					case MBT_U: map_u(ch, map_fu(val64.f)); break;
 					case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1294,7 +1294,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 					case MBT_F: map_f(ch, hal->pins[p]->f); break;
 					}
 				} else {
-					val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * hal->scales[p]->f;
+					val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * *(hal->scales[p]);
 					switch(mtypetype(ch->cmd.mtype)) {
 					case MBT_U: map_u(ch, map_fu(val64.f)); break;
 					case MBT_S: map_s(ch, map_fs(val64.f)); break;
@@ -1647,9 +1647,9 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 				}
 				if(hasscale(ch)) {
 					switch(mtypetype(ch->cmd.mtype)) {
-					case MBT_U:	hal->scaleds[p]->f = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * hal->scales[p]->f; break;
-					case MBT_S:	hal->scaleds[p]->f = (real_t)(val64.s - hal->offsets[p]->ls) * hal->scales[p]->f; break;
-					case MBT_F:	hal->scaleds[p]->f = (val64.f - hal->offsets[p]->f) * hal->scales[p]->f; break;
+					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
+					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
+					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
 					}
 				}
 				break;
@@ -1668,9 +1668,9 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 				}
 				if(hasscale(ch)) {
 					switch(mtypetype(ch->cmd.mtype)) {
-					case MBT_U:	hal->scaleds[p]->f = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * hal->scales[p]->f; break;
-					case MBT_S:	hal->scaleds[p]->f = (real_t)(val64.s - hal->offsets[p]->ls) * hal->scales[p]->f; break;
-					case MBT_F:	hal->scaleds[p]->f = (val64.f - hal->offsets[p]->f) * hal->scales[p]->f; break;
+					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
+					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
+					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
 					}
 				}
 				break;
@@ -1682,9 +1682,9 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 				}
 				if(hasscale(ch)) {
 					switch(mtypetype(ch->cmd.mtype)) {
-					case MBT_U:	hal->scaleds[p]->f = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * hal->scales[p]->f; break;
-					case MBT_S:	hal->scaleds[p]->f = (real_t)(val64.s - hal->offsets[p]->ls) * hal->scales[p]->f; break;
-					case MBT_F:	hal->scaleds[p]->f = (val64.f - hal->offsets[p]->f) * hal->scales[p]->f; break;
+					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
+					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
+					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
 					}
 				}
 				break;
@@ -2293,7 +2293,7 @@ int rtapi_app_main(void)
 			retval = -ENOMEM;
 			goto errout;
 		}
-		if(!(inst->hal->scales = (hal_data_u **)hal_malloc(inst->npins * sizeof(*inst->hal->scales)))) {
+		if(!(inst->hal->scales = (hal_float_t **)hal_malloc(inst->npins * sizeof(*inst->hal->scales)))) {
 			MSG_ERR("%s: error: Failed to allocate HAL scales memory\n", inst->name);
 			retval = -ENOMEM;
 			goto errout;
@@ -2303,7 +2303,7 @@ int rtapi_app_main(void)
 			retval = -ENOMEM;
 			goto errout;
 		}
-		if(!(inst->hal->scaleds = (hal_data_u **)hal_malloc(inst->npins * sizeof(*inst->hal->scaleds)))) {
+		if(!(inst->hal->scaleds = (hal_float_t **)hal_malloc(inst->npins * sizeof(*inst->hal->scaleds)))) {
 			MSG_ERR("%s: error: Failed to allocate HAL scaleds memory\n", inst->name);
 			retval = -ENOMEM;
 			goto errout;
@@ -2334,8 +2334,8 @@ int rtapi_app_main(void)
 			inst->_cmds[i].cmd = inst->cmdsptr[i];
 		}
 
-		// Setup to start sending init packets
-		inst->cmds = inst->_init;
+		// Setup to start sending init or command packets
+		inst->cmds = inst->ninit ? inst->_init : inst->_cmds;
 
 		// Export the HAL process function
 		if((retval = hal_export_functf(process, inst, 1, 0, comp_id, COMP_NAME".%d.process", i)) < 0) {
@@ -2465,11 +2465,11 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_s32_newf(dir, (hal_s32_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
-							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							inst->hal->scales[p]->f = 1.0;
+							*(inst->hal->scales[p]) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
@@ -2496,11 +2496,11 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_s64_newf(dir, (hal_s64_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
-							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							inst->hal->scales[p]->f = 1.0;
+							*(inst->hal->scales[p]) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
@@ -2527,11 +2527,11 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_float_newf(dir, (hal_float_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
-							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							inst->hal->scales[p]->f = 1.0;
+							*(inst->hal->scales[p]) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
