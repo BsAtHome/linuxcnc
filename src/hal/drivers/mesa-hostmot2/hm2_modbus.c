@@ -2466,28 +2466,28 @@ int rtapi_app_main(void)
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
 							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
-									comp_id, "%s.%s-scale", inst->name, CPTR(dptr)));
+									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							inst->hal->scales[p]->f = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
-										comp_id, "%s.%s-scaled", inst->name, CPTR(dptr)));
+										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
 									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
 									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
 							} else {
 								CHECK(hal_pin_s32_newf(HAL_IN, (hal_s32_t**)&(inst->hal->offsets[p]),
-										comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
 						}
 						p++;
@@ -2497,28 +2497,28 @@ int rtapi_app_main(void)
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
 							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
-									comp_id, "%s.%s-scale", inst->name, CPTR(dptr)));
+									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							inst->hal->scales[p]->f = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
-										comp_id, "%s.%s-scaled", inst->name, CPTR(dptr)));
+										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
 									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
 									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
 							} else {
 								CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
-										comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
 						}
 						p++;
@@ -2528,28 +2528,29 @@ int rtapi_app_main(void)
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(hasscale(cmd)) {
 							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->scales[p]),
-									comp_id, "%s.%s-scale", inst->name, CPTR(dptr)));
+									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							inst->hal->scales[p]->f = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, (hal_float_t**)&(inst->hal->scaleds[p]),
-										comp_id, "%s.%s-scaled", inst->name, CPTR(dptr)));
+										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->cmd.mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
 									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
 									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
-											comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
+											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
+							} else {
+								CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
+										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
-							CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
-									comp_id, "%s.%s-offset", inst->name, CPTR(dptr)));
 							inst->hal->offsets[p]->f = 0.0;
 						}
 						p++;
