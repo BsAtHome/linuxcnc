@@ -635,7 +635,7 @@ retry_next_init:
 			// experienced delay.
 			if(ch->cmd.interval == 0xffffffff)
 				ch->interval = RTAPI_INT64_MAX;
-			else if((ch->interval += ch->cmd.interval) < 0)
+			else if((ch->interval += ch->cmd.interval * 1000) < 0)
 				ch->interval = -1;
 
 			if((r = build_data_frame(inst)) < 0) {
