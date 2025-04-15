@@ -148,10 +148,14 @@
 #define HM2_PKTUART_CLEAR 0x80010000
 
 // Receive count register
-#define HM2_PKTUART_RCR_MASK              0xffff
+#define HM2_PKTUART_RCR_MASK              0xff00c3ff
+#define HM2_PKTUART_RCR_ICHARBITS_BIT     24  // bits 24..31 Max inter-character bit-times (V3+ only)
 #define HM2_PKTUART_RCR_ERROROVERRUN_BIT  15
 #define HM2_PKTUART_RCR_ERRORSTARTBIT_BIT 14
-#define HM2_PKTUART_RCR_NBYTES_BIT         0
+#define HM2_PKTUART_RCR_NBYTES_BIT         0  // bits 0..9 Frame size
+#define HM2_PKTUART_RCR_ICHARBITS_MASK    (0xffu << HM2_PKTUART_RCR_ICHARBITS_BIT)
+#define HM2_PKTUART_RCR_ICHARBITS(x)      (((x) & 0xffu) << HM2_PKTUART_RCR_ICHARBITS_BIT)
+#define HM2_PKTUART_RCR_ICHARBITS_VAL(x)  (((x) >> HM2_PKTUART_RCR_ICHARBITS_BIT) & 0xffu)
 #define HM2_PKTUART_RCR_ERROROVERRUN      (1u << HM2_PKTUART_RCR_ERROROVERRUN_BIT)
 #define HM2_PKTUART_RCR_ERRORSTARTBIT     (1u << HM2_PKTUART_RCR_ERRORSTARTBIT_BIT)
 #define HM2_PKTUART_RCR_NBYTES_MASK       (0x3ffu << HM2_PKTUART_RCR_NBYTES_BIT)
@@ -167,18 +171,18 @@ typedef struct {
     rtapi_u32 drivedelay; // TX only: delay before transmit ([0..31])
     rtapi_u32 ifdelay;    // RX+TX: Inter-frame delay in bit times ([0..255] or V3+ [0..1020])
     rtapi_u32 flags;      // RX+TX: enable flags (see HM2_PKTUART_CONFIG_*)
+    rtapi_u32 unused[3];  // Future proof, probably
 } hm2_pktuart_config_t;
 
-#define HM2_PKTUART_CONFIG_DRIVEEN	0x0001	// TX flag
-#define HM2_PKTUART_CONFIG_DRIVEAUTO	0x0002	// TX flag
-#define HM2_PKTUART_CONFIG_RXEN		0x0004	// RX flag
-#define HM2_PKTUART_CONFIG_RXMASKEN	0x0008	// RX flag
-#define HM2_PKTUART_CONFIG_IFSCALE	0x0010	// RX+TX Will use x4 scale of ifdelay (V3+)
-#define HM2_PKTUART_CONFIG_PARITYEN	0x0020	// RX+TX Parity enable
-#define HM2_PKTUART_CONFIG_PARITYODD	0x0040	// RX+TX Parity Odd (even when unset and parity enabled)
-#define HM2_PKTUART_CONFIG_STOPBITS2	0x0080	// RX+TX Set two stopbits (V3+)
+#define HM2_PKTUART_CONFIG_DRIVEEN	0x0001	// TX-only Output driver enable
+#define HM2_PKTUART_CONFIG_DRIVEAUTO	0x0002	// TX-only Output drive auto-on on send
+#define HM2_PKTUART_CONFIG_RXEN		0x0010	// RX-only Receiver enable
+#define HM2_PKTUART_CONFIG_RXMASKEN	0x0020	// RX-only Receiver masked when sending (half-duplex)
+#define HM2_PKTUART_CONFIG_PARITYEN	0x0100	// RX+TX Parity enable
+#define HM2_PKTUART_CONFIG_PARITYODD	0x0200	// RX+TX Parity Odd (even when unset and parity enabled)
+#define HM2_PKTUART_CONFIG_STOPBITS2	0x0400	// RX+TX Set two stopbits (V3+)
 #define HM2_PKTUART_CONFIG_FLUSH	0x4000	// RX+TX flag (flush fifo and count regs)
-#define HM2_PKTUART_CONFIG_FORCECONFIG	0x8000	// Always write the config to the board, even when not changed
+#define HM2_PKTUART_CONFIG_FORCECONFIG	0x8000	// RX+TX Always write the config to the board, even when not changed
 
 // hm2_pktuart_config() replaces previous pktuart serial setup functions
 // Changes can now be done without changing the prototype

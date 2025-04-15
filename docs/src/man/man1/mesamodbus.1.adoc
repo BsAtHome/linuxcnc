@@ -124,12 +124,14 @@ other setup values as attributes:
 * 'duplex': [full,half]
   Whether 2-wire (half duplex) or 4-wire (full duplex) communication is set.
   Default half.
-* 'interval': [0, 1000000000]
-  The command repeat interval in micro-seconds. This is the time between
-  repeating the '<commands>' list (sending writes and receiving reads from the
-  Modbus devices). An interval shorter than the time it takes to work through
-  the '<commands>' list will just repeat the '<commands>' list as fast as
-  possible. Default 0.
+* 'interval': [0..3600000000]
+  The default command repeat interval in micro-seconds. This is effectively the
+  time between repeating the '<commands>' list (sending writes and receiving
+  reads from the Modbus devices). An interval shorter than the time it takes to
+  work through the '<commands>' list will just repeat the '<commands>' list as
+  fast as possible. +
+  The 'interval' may be overridden in the individual '<commands><command>'
+  instructions. Default 0.
 * 'parity': [N, O, E]
   Communication parity none (N), odd (O) or even (E). Default E.
 * 'rxdelay', 'txdelay': [auto,0..1020]
@@ -284,8 +286,9 @@ Recognized '<initlist>/<command>/<data>' attributes:
 === HAL TYPES
 A '<command>' in the '<commands>' section maps to one or more HAL pins with
 specific type using the 'haltype' attribute. Recognized are: 'HAL_BIT',
-'HAL_FLOAT', 'HAL_S32', 'HAL_U32', 'HAL_S64' and 'HAL_U64'. Note that coil and
-binary input functions (1, 2, 5 and 15) can only map to 'HAL_BIT'.
+'HAL_FLOAT', 'HAL_S32', 'HAL_U32', 'HAL_S64' and 'HAL_U64' (also without the
+HAL_ prefix). Note that coil and binary input functions (1, 2, 5 and 15) can
+only map to 'HAL_BIT' and do so implicitly.
 
 The 'HAL_U32' and 'HAL_U64' types always map to one single HAL pin.
 
@@ -383,6 +386,12 @@ Recognized '<commands>/<command>' attributes:
   The HAL pin type for interactions. You do not need to specify this attribute
   for Modbus functions read/write coil(s) or inputs (1, 2, 5 and 15) as these
   always use the HAL_BIT type.
+* 'interval': [once,0..3600000000]
+  The command repeat interval in micro-seconds. This is the time between
+  repeating this '<command>'. An interval shorter than the time it takes to work
+  through the '<commands>' list will just repeat this '<command>' as fast as
+  possible. A special value of 'once' will run this command only once. However,
+  it will be retried is an error occurred. Default 0.
 * 'modbustype': [see *MODBUS TYPES*]
   The Modbus data mapping from/to register(s) for Modbus functions read/write
   register(s) (3, 4, 6 and 16). The default is U_AB if not specified.

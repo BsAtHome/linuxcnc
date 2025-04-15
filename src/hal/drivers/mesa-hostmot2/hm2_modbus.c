@@ -204,7 +204,6 @@ typedef struct {
 	hal_u32_t txdelay;	// RW Inter frame delay for packets sent
 	hal_u32_t rxdelay;	// RW Inter frame delay for packet end detection in receive
 	hal_u32_t drvdelay;	// RW Delay before sending data (in bit times)
-	hal_u32_t interval;	// RW Loop rate in microseconds
 } hm2_modbus_hal_t;
 
 // The command structure and data buffer.
@@ -212,6 +211,7 @@ typedef struct {
 // few kilobytes is not fatal in modern times.
 typedef struct {
 	hm2_modbus_mbccb_cmds_t cmd;	// In host order
+	rtapi_s64	interval;			// The running interval of this command
 	int pinref;		// What pin to start with
 	int disabled;	// Skipped if set
 	int errors;		// Count the errors
@@ -227,11 +227,11 @@ static inline bool hasclamp(const hm2_modbus_cmd_t *ch)     { return 0 != (ch->c
 static inline bool hasresend(const hm2_modbus_cmd_t *ch)    { return 0 != (ch->cmd.flags & MBCCB_CMDF_RESEND); }
 
 typedef struct {
-	char		name[HAL_NAME_LEN+1];		// What we call ourselves (hm2_modbus.X)
-	char		uart[HAL_NAME_LEN+1];		// The PktUART we attached to (like hm2_5i25.Y.pktuart.Z)
+	char		name[HAL_NAME_LEN];		// What we call ourselves (hm2_modbus.X)
+	char		uart[HAL_NAME_LEN];		// The PktUART we attached to (like hm2_5i25.Y.pktuart.Z)
 
 	hm2_modbus_mbccb_header_t *mbccb;		// Modbus command control binary
-	ssize_t		mbccbsize;						// Buffer/file size
+	ssize_t		mbccbsize;					// Buffer/file size
 	const hm2_modbus_mbccb_cmds_t *initptr;	// Pointer to mbccb init section
 	hm2_modbus_mbccb_cmds_t *cmdsptr;		// Pointer to mbccb cmds section
 	const rtapi_u8 *dataptr;				// Pointer to mbccb data section
@@ -240,23 +240,24 @@ typedef struct {
 	unsigned	npins;		// Total number of pins
 
 	hm2_modbus_hal_t *hal;	// HAL pins and params
+
 	hm2_modbus_cmd_t *_init;	// List of inits sent initially
 	hm2_modbus_cmd_t *_cmds;	// List of commands sent in loop
-	hm2_modbus_cmd_t *cmds;	// List of commands sent in loop *or* inits at startup
-	unsigned	cmdidx;		// Where are we in the list
+	hm2_modbus_cmd_t *cmds;		// List of commands sent in loop *or* inits at startup
+	unsigned cmdidx;			// Where are we in the list
 
 	hm2_pktuart_config_t cfg_rx;	// Receiver config
 	hm2_pktuart_config_t cfg_tx;	// Transmitter config
 
-	int			state;		// State-machine state
-	int			ignoredata;	// Ignore received packet is set
+	int			state;			// State-machine state
+	int			ignoredata;		// Ignore received packet if set
+	unsigned	maxicharbits;	// The max allowed inter-character delay (in bit-times)
 
 	unsigned	frameidx;	// Which frame we are handling (should only ever be 0)
 	rtapi_u32	fsizes[16];	// See HM2_PKTUART_RCR_* defines for bit-fields
 	rtapi_u32	rxdata[256];	// 0x400 bytes, 0x100 32-bit words
 
-	long		interval;	// Interval timer (for tracking update-hz rate)
-	long		timeout;	// Timeout timer for commands
+	rtapi_s64	timeout;	// Timeout timer for commands
 } hm2_modbus_inst_t;
 
 typedef struct {
@@ -321,8 +322,9 @@ static int do_setup(hm2_modbus_inst_t *inst, int queue)
 		&& inst->cfg_rx.ifdelay    == inst->hal->rxdelay
 		&& inst->cfg_tx.drivedelay == inst->hal->drvdelay) return 0;
 
-	if(inst->hal->txdelay > 0xFF) inst->hal->txdelay = 0xFF;
-	if(inst->hal->rxdelay > 0xFF) inst->hal->rxdelay = 0xFF;
+	if(inst->hal->txdelay > 0x3fc) inst->hal->txdelay = 0x3fc;
+	if(inst->hal->rxdelay > 0x3fc) inst->hal->rxdelay = 0x3fc;
+	if(inst->hal->drvdelay > 0x1f) inst->hal->drvdelay = 0x1f;
 	inst->cfg_tx.ifdelay    = inst->hal->txdelay;
 	inst->cfg_rx.ifdelay    = inst->hal->rxdelay;
 	inst->cfg_tx.drivedelay = inst->hal->drvdelay;
@@ -376,6 +378,10 @@ static int send_modbus_pkt(hm2_modbus_inst_t *inst)
 static inline void force_resend(hm2_modbus_inst_t *inst)
 {
 	inst->cmds[inst->cmdidx].data[1] = 0xff;
+	// If this was a 'once' command, make sure it gets resend asap in the next
+	// round
+	if(inst->cmds[inst->cmdidx].cmd.interval == 0xffffffff)
+		inst->cmds[inst->cmdidx].interval = -1;
 }
 
 //
@@ -429,6 +435,12 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 
 	// Exit actions
 	switch(inst->state) {
+	case STATE_START:
+		// Exiting the START state means we are running a command and need to
+		// setup the timeout. If this is no command, then the timeout setting
+		// will be overridden locally in the code after the state change.
+		inst->timeout = (rtapi_s64)inst->cmds[inst->cmdidx].cmd.timeout * 1000;
+		break;
 	}
 
 	inst->state = newstate;	// Switch over
@@ -442,10 +454,8 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 	case STATE_START:
 		inst->ignoredata = 0;	// Re-enable data handling
 		next_command(inst);
-		/* Fallthrough */
+		break;
 	default:
-		// Always set the timeout counter on state change
-		inst->timeout = inst->cmds[inst->cmdidx].cmd.timeout * 1000;
 		break;
 	}
 }
@@ -503,7 +513,11 @@ static void process(void *arg, long period)
 	rtapi_u32 rxstatus = hm2_pktuart_get_rx_status(inst->uart);
 	rtapi_u32 txstatus = hm2_pktuart_get_tx_status(inst->uart);
 
-	inst->interval -= period;	// Keep counting nanoseconds
+	if(inst->cmds == inst->_cmds) {
+		// Only count timeout when running the command list
+		for(unsigned i = 0; i < inst->ncmds; i++)
+			inst->cmds[i].interval -= period;	// Keep counting nanoseconds
+	}
 	inst->timeout  -= period;
 
 	switch(inst->state) {
@@ -566,18 +580,7 @@ retry_next_init:
 
 		// Handling normal commands loop
 
-		// At the start of a cycle, test the interval timer.
 		if(!inst->cmdidx) {
-			long iv = (long)inst->hal->interval;
-			if(iv) {
-				if(inst->interval > 0)
-					break;	// Timer still running
-				// Reset the timer. The cycle is now starting.
-				inst->interval = iv * 1000;
-			} else {
-				inst->interval = 0;
-			}
-
 			// We are at the start of a cycle. If the first command message is
 			// disabled, then try the next.
 			if(inst->cmds[inst->cmdidx].disabled) {
@@ -594,6 +597,8 @@ retry_next_init:
 
 		// See if the comms params have changed and if so, change them (queued).
 		if((r = do_setup(inst, 1)) < 0) {
+			// If queueing a new setup errors then we are in deep trouble...
+			// Most likely, everything else will fail too.
 			MSG_DBG("Failed port setup (%d), resetting\n", r);
 			queue_reset(inst);
 			// Tampering with the txdelay ensures we really try to setup again
@@ -611,23 +616,38 @@ retry_next_init:
 		// Cycle through the commands until one is found to have data that
 		// needs to be sent.
 		do {
-			if(0 == inst->cmds[inst->cmdidx].cmd.func) {
+			hm2_modbus_cmd_t *ch = &inst->cmds[inst->cmdidx];
+			if(0 == ch->cmd.func) {
 				// This is a delay command
 				// The timeout will be set in set_state()
 				set_state(inst, STATE_WAIT_FOR_TIMEOUT);
 				break;
 			}
 
+			// The command may not yet be 'ripe', try next
+			if(ch->interval >= 0)
+				continue;
+
+			// Reset the command's interval timer. The 'once' commands will
+			// repeat every 292 years or so. If the command fails and needs a
+			// resend, then the interval is patched (see force_resend()).
+			// Reset to asap if the interval is shorter than the previous
+			// experienced delay.
+			if(ch->cmd.interval == 0xffffffff)
+				ch->interval = RTAPI_INT64_MAX;
+			else if((ch->interval += ch->cmd.interval) < 0)
+				ch->interval = -1;
+
 			if((r = build_data_frame(inst)) < 0) {
 				// We cannot recover from data frames that cannot be build. The
 				// next round would end in the same error. Therefore, disabling
 				// the command is our only option.
-				MSG_ERR("%s: error: Build data frame failed ccommand %d, disabling\n", inst->name, inst->cmdidx);
-				inst->cmds[inst->cmdidx].disabled = 1;
-				inst->cmds[inst->cmdidx].errors++;
+				MSG_ERR("%s: error: Build data frame failed command %d, disabling\n", inst->name, inst->cmdidx);
+				ch->disabled = 1;
+				ch->errors++;
 				continue; // Just try next command
 			}
-			if(r || hasresend(&inst->cmds[inst->cmdidx])) { // if data has changed or forced
+			if(r || hasresend(ch)) { // if data has changed or forced
 				if((r = send_modbus_pkt(inst)) < 0) {
 					if(r == -EMSGSIZE) {
 						// We cannot recover if the error occurred because the
@@ -638,8 +658,8 @@ retry_next_init:
 						// give problems again. It will probably cause havoc in
 						// the application, but that should be OK.
 						MSG_ERR("%s: error: Command %d disabled\n", inst->name, inst->cmdidx);
-						inst->cmds[inst->cmdidx].disabled = 1;
-						inst->cmds[inst->cmdidx].errors++;
+						ch->disabled = 1;
+						ch->errors++;
 						continue; // Just try next command
 					}
 					MSG_ERR("%s: error: Send PDU failed (error %d) command %d, resetting\n", inst->name, r, inst->cmdidx);
@@ -753,10 +773,29 @@ wait_for_data_frame:
 	case STATE_FETCH_MORE_DATA:
 		MSG_DBG("WAIT_FOR_FRAME_SIZES Index %u Frames 0x%04x 0x%04x 0x%04x 0x%04x\n",
 			inst->frameidx, inst->fsizes[0], inst->fsizes[1], inst->fsizes[2], inst->fsizes[3]);
-		if((inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT))
-			||  (HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]) > MAX_PKT_LEN)) { // indicates an overrun
-			MSG_DBG("RESET\n");
+		if(inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
+			MSG_WARN("%s: warning: reply to command %u had an error bit set in fsize (0x%04x), dropping\n",
+					inst->name, inst->cmdidx,
+					inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT));
+			set_error(&inst->cmds[inst->cmdidx]);
 			queue_reset(inst);
+			force_resend(inst);
+		}
+		if(HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]) > MAX_PKT_LEN) { // indicates an overrun
+			MSG_WARN("%s: warning: reply to command %u had packet size overrun (%u > %u), dropping\n",
+					inst->name, inst->cmdidx,
+					HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]), MAX_PKT_LEN);
+			set_error(&inst->cmds[inst->cmdidx]);
+			queue_reset(inst);
+			force_resend(inst);
+			break;
+		}
+		if(inst->maxicharbits && HM2_PKTUART_RCR_ICHARBITS_VAL(inst->fsizes[inst->frameidx]) > inst->maxicharbits) {
+			MSG_WARN("%s: warning: reply to command %u had too long inter-character delay (%u > %u), dropping\n",
+					inst->name, inst->cmdidx,
+					HM2_PKTUART_RCR_ICHARBITS_VAL(inst->fsizes[inst->frameidx]), inst->maxicharbits);
+			set_error(&inst->cmds[inst->cmdidx]);
+			force_resend(inst);
 			break;
 		}
 		r = hm2_pktuart_queue_read_data(inst->uart, inst->rxdata, HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]));
@@ -766,6 +805,9 @@ wait_for_data_frame:
 		set_state(inst, STATE_WAIT_A_BIT);
 		break;
 
+	// FIXME: This state is effectively useless.
+	// The queued read in STATE_WAIT_FOR_FRAME_SIZES should have resolved
+	// immediately after returning in the process() function.
 	case STATE_WAIT_A_BIT:
 		set_state(inst, STATE_WAIT_FOR_DATA);
 		break;
@@ -801,7 +843,9 @@ wait_for_data_frame:
 			do_timeout(inst);
 			break;
 		}
+#ifdef DEBUG_STATE
 		MSG_DBG("\n");
+#endif
 		set_state(inst, STATE_START);
 		*(inst->hal->fault) = 0;
 		break;
@@ -1939,7 +1983,10 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 	// Make header's byte sex native from big-endian
 	// Skip the signature words and byte values
 	mbccb->baudrate = be32_to_cpu(mbccb->baudrate);
-	mbccb->interval = be32_to_cpu(mbccb->interval);
+	mbccb->format   = be16_to_cpu(mbccb->format);
+	mbccb->txdelay  = be16_to_cpu(mbccb->txdelay);
+	mbccb->rxdelay  = be16_to_cpu(mbccb->rxdelay);
+	mbccb->drvdelay = be16_to_cpu(mbccb->drvdelay);
 	//for(unsigned i = 0; i < sizeof(mbccb->unused)/sizeof(mbccb->unused[0]); i++)
 	//	mbccb->unused[i] = be32_to_cpu(mbccb->unused[i]);
 	mbccb->initlen  = be32_to_cpu(mbccb->initlen);
@@ -1952,13 +1999,8 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		MSG_WARN("%s: warning: Mbccb baudrate %u faster than 115200 baud. May fail to setup\n", inst->name, mbccb->baudrate);
 	}
 
-	switch(MBCCB_FORMAT_PARITY_VAL(mbccb->format)) {
-	case MBCCB_FORMAT_PARITY_NONE:
-	case MBCCB_FORMAT_PARITY_ODD:
-	case MBCCB_FORMAT_PARITY_EVEN:
-		break;
-	default:
-		MSG_ERR("%s: error: Mbccb parity value 0x%02x unrecognized\n", inst->name, MBCCB_FORMAT_PARITY_VAL(mbccb->format));
+	if((mbccb->format & MBCCB_FORMAT_PARITYODD) && !(mbccb->format & MBCCB_FORMAT_PARITYEN)) {
+		MSG_ERR("%s: error: Mbccb parity Odd set while parity disabled\n", inst->name);
 		goto errout;
 	}
 
@@ -2013,10 +2055,11 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		initptr[i].addr    = be16_to_cpu(initptr[i].addr);
 		initptr[i].pincnt  = be16_to_cpu(initptr[i].pincnt);
 		initptr[i].flags   = be16_to_cpu(initptr[i].flags);
+		initptr[i].interval= be32_to_cpu(initptr[i].interval);
 		initptr[i].timeout = be32_to_cpu(initptr[i].timeout);
 		initptr[i].dataptr = be32_to_cpu(initptr[i].dataptr);
 
-		if(initptr[i].pincnt || initptr[i].mtype || initptr[i].htype) {
+		if(initptr[i].pincnt || initptr[i].mtype || initptr[i].htype || initptr[i].interval) {
 			MSG_ERR("%s: error: Mbccb init %u zero fields are not zero\n", inst->name, i);
 			goto errout;
 		}
@@ -2088,6 +2131,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		cmdsptr[c].addr    = be16_to_cpu(cmdsptr[c].addr);
 		cmdsptr[c].pincnt  = be16_to_cpu(cmdsptr[c].pincnt);
 		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].flags);
+		cmdsptr[c].interval= be32_to_cpu(cmdsptr[c].interval);
 		cmdsptr[c].timeout = be32_to_cpu(cmdsptr[c].timeout);
 		cmdsptr[c].dataptr = be32_to_cpu(cmdsptr[c].dataptr);
 
@@ -2356,30 +2400,31 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->txdelay),  comp_id, "%s.txdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
-		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->interval), comp_id, "%s.interval", inst->name));
 
 		CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->fault),     comp_id, "%s.fault", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->faultcmd),  comp_id, "%s.fault-command", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->lasterror), comp_id, "%s.last-error", inst->name));
 
-		inst->hal->interval = inst->mbccb->interval;
 		inst->hal->baudrate = inst->cfg_rx.baudrate = inst->cfg_tx.baudrate = inst->mbccb->baudrate;
-		unsigned parity = MBCCB_FORMAT_PARITY_VAL(inst->mbccb->format);
-		if(parity != 0) {
+		unsigned parity = 0;
+		if(inst->mbccb->format & MBCCB_FORMAT_PARITYEN) {
 			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
 			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
+			parity |= 2;
 		}
-		if(parity == 1) {
+		if(inst->mbccb->format & MBCCB_FORMAT_PARITYODD) {
 			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
 			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
+			parity |= 1;
 		}
-		unsigned stopbits = MBCCB_FORMAT_STOPBITS2_VAL(inst->mbccb->format);
-		if(stopbits) {
+		unsigned stopbits = 1;
+		if(inst->mbccb->format & MBCCB_FORMAT_STOPBITS2) {
 			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
 			inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
+			stopbits = 2;
 		}
 		inst->hal->parity   = parity;
-		inst->hal->stopbits = stopbits ? 2 : 1;
+		inst->hal->stopbits = stopbits;
 		// The following three will be copied to the instance in do_setup()
 		inst->hal->rxdelay  = inst->mbccb->rxdelay;
 		inst->hal->txdelay  = inst->mbccb->txdelay;
@@ -2390,6 +2435,26 @@ int rtapi_app_main(void)
 		if(!(inst->mbccb->format & MBCCB_FORMAT_DUPLEX))
 			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXMASKEN;	// Set rx masking is half-duplex
 		inst->cfg_tx.flags = HM2_PKTUART_CONFIG_DRIVEEN | HM2_PKTUART_CONFIG_DRIVEAUTO;
+
+		if((retval = hm2_pktuart_get_version(inst->uart)) < 0) {
+			MSG_ERR("%s: error: Cannot get PktUART version (error=%d)\n", inst->name, retval);
+			goto errout;
+		}
+
+		// A V3+ RX has inter-character delay measurement
+		// t1.5: see section 2.5.5.1 of
+		// of "MODBUS over serial line specification and implementation guide V1.02"
+		if(((retval >> 4) & 0x0f) >= 3) {
+			if(inst->mbccb->baudrate <= 19200) {
+				unsigned bits = 8 + (parity ? 1 : 0) + stopbits;
+				inst->maxicharbits = (15 * bits + 14) / 10;	// 1.5 char delay
+			} else {
+				unsigned bits = (75 * inst->mbccb->baudrate + 99999) / 100000;	// 750 us
+				inst->maxicharbits = bits > 0xff ? 0xff : bits;
+			}
+		} else {
+			inst->maxicharbits = 0;
+		}
 
 		MSG_DBG("%s: inst->name     : %s\n", inst->name, inst->name);
 		MSG_DBG("%s: inst->uart     : %s\n", inst->name, inst->uart);
@@ -2403,8 +2468,8 @@ int rtapi_app_main(void)
 
 		MSG_INFO("%s: PktUART serial configured to 8%c%c@%d\n",
 					inst->name,
-					parity ? (parity == 1 ? 'O' : 'E') : 'N',
-					stopbits ? '2' : '1',
+					parity ? (parity == 2 ? 'E' : 'O') : 'N',
+					stopbits > 1 ? '2' : '1',
 					inst->cfg_rx.baudrate);
 
 		*(inst->hal->fault)     = 0;
