@@ -263,6 +263,10 @@ static int config_tx(const char *name, const hostmot2_t* hm2, hm2_pktuart_instan
 
 	if(hm2->pktuart.tx_version >= 2) {
 		bitrate = (rtapi_u64)cfg->baudrate * 16777216ul / inst->clock_freq; // 24 bits in v2+
+		if(!bitrate)
+			bitrate = 1;
+		if(bitrate > 0x00ffffff)
+			bitrate = 0x00ffffff;
 	} else {
 		bitrate = (rtapi_u64)cfg->baudrate * 1048576ul / inst->clock_freq;  // 20 bits in v0 & v1
 	}
@@ -336,6 +340,10 @@ static int config_rx(const char *name, const hostmot2_t *hm2, hm2_pktuart_instan
 	if(hm2->pktuart.rx_version >= 2) {
 		if(filter > 0xFFFF) filter = 0xFFFF;
 		bitrate = (rtapi_u64)cfg->baudrate * 16777216ul / inst->clock_freq; // 24 bits in v2+
+		if(!bitrate)
+			bitrate = 1;
+		if(bitrate > 0x00ffffff)
+			bitrate = 0x00ffffff;
 		bitrate |= (rtapi_u32)((filter & 0xFF00) << 16); // High 8 bits
 		// Low 8 filter bits set below
 	} else {
@@ -569,18 +577,18 @@ EXPORT_SYMBOL_GPL(hm2_pktuart_setup);
 //
 // Queue *num_framed of data with each frame's size as an entry in the
 // frame_sizes array.
+// Returns the total number of bytes sent.
 //
 int hm2_pktuart_send(const char *name, const unsigned char data[], rtapi_u8 *num_frames, const rtapi_u16 frame_sizes[])
 {
 	hostmot2_t *hm2;
-	rtapi_u32 buff;
 	int c = 0;
 	int r = 0;
-	rtapi_u16 count = 0;
+	int count = 0;
 	int inst;
 	// we work with nframes as a local copy of num_frames, so that we can
 	// return the num_frames sent out in case of SCFIFO error.
-	rtapi_u8 nframes;
+	unsigned nframes;
 
 	inst = hm2_get_pktuart(&hm2, name);
 	if(inst < 0) {
@@ -605,21 +613,21 @@ int hm2_pktuart_send(const char *name, const unsigned char data[], rtapi_u8 *num
 
 	*num_frames = 0;
 
-	rtapi_u8 i;
-	for(i = 0; i < nframes; i++) {
-		count = count + frame_sizes[i];
+	for(unsigned i = 0; i < nframes; i++) {
+		count += frame_sizes[i];
 		while(c < count - 3) {
-			buff = data[c] + (data[c+1] << 8) + (data[c+2] << 16) + (data[c+3] << 24);
+			rtapi_u32 buff = data[c] + (data[c+1] << 8) + (data[c+2] << 16) + (data[c+3] << 24);
 			r = hm2->llio->queue_write(hm2->llio, hm2->pktuart.instance[inst].tx_addr, &buff, sizeof(buff));
 			if(r < 0) {
 				HM2_ERR("%s send: hm2->llio->queue_write failure\n", name);
 				return r;
 			}
-			c = c + 4;
+			c += 4;
 		}
 
 		// Now write the last bytes with bytes number < 4
 		if(count - c) {
+			rtapi_u32 buff;
 			switch(count - c) {
 			case 1: buff = data[c]; break;
 			case 2: buff = (data[c] + (data[c+1] << 8)); break;
@@ -639,11 +647,11 @@ int hm2_pktuart_send(const char *name, const unsigned char data[], rtapi_u8 *num
 	} // for loop
 
 	// Write the number of bytes to be sent to PktUARTx sendcount register
-	for(i = 0; i < nframes; i++) {
-		buff = (rtapi_u32) frame_sizes[i];
+	for(unsigned i = 0; i < nframes; i++) {
+		rtapi_u32 buff = frame_sizes[i];
 		r = hm2->llio->queue_write(hm2->llio, hm2->pktuart.instance[inst].tx_fifo_count_addr, &buff, sizeof(buff));
 		// Check for Send Count FIFO error
-		// XXX ==> Deleted a queue_read that originally was a unqueued read.
+		// XXX ==> Deleted a queue_read that originally was a non-queued read.
 		// Not possible to check for errors on the fly when using queued
 		// transfers. The data does not arrive immediately. Therefore, no
 		// checks can be done here.
