@@ -1414,7 +1414,7 @@ def main():
     par = [0, MBCCB_FORMAT_PARITYEN | MBCCB_FORMAT_PARITYODD, MBCCB_FORMAT_PARITYEN, 0]
     stp = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
     dpl = MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
-    header = (struct.pack(">8sIHHHHIIIIIIIIIIII",
+    header = (struct.pack(">8sIHHHHIIIIIIIIIII",
                         b'MesaMB01',
                         configparams['baudrate'],
                         par[configparams['parity']] | stp | dpl,
