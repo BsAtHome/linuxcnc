@@ -10,23 +10,16 @@
 //
 // Filesize = sizeof(header) + header.initlen + header.cmdlen + header.datalen.
 //
-#define MBCCB_FORMAT_PARITY_NONE      0
-#define MBCCB_FORMAT_PARITY_ODD       1
-#define MBCCB_FORMAT_PARITY_EVEN      2
-
-#define MBCCB_FORMAT_PARITY_BIT       0 // bits 0..1  00=8Nx 01=8Ox 10=8Ex 11=invalid
-#define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2     0=8x1 1=8x2
-#define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3     Set for full-duplex (rx-mask off)
-#define MBCCB_FORMAT_IFSCALE_BIT      7 // bit  7     Inter-frame delay scale 0=1x, 1=4x
-#define MBCCB_FORMAT_PARITY_MASK     (3u << MBCCB_FORMAT_PARITY_BIT)
-#define MBCCB_FORMAT_PARITY(x)       (((x) & 3u) << MBCCB_FORMAT_PARITY_BIT)
-#define MBCCB_FORMAT_PARITY_VAL(x)   (((x) >> MBCCB_FORMAT_PARITY_BIT) & 3u)
+#define MBCCB_FORMAT_PARITYEN_BIT     0 // bits 0 Enable parity if set
+#define MBCCB_FORMAT_PARITYODD_BIT    1 // bits 1 Odd parity if set
+#define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2 0=8x1 1=8x2
+#define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3 Set for full-duplex (rx-mask off)
+#define MBCCB_FORMAT_IFSCALE_BIT      7 // bit  7 Inter-frame delay scale 0=1x, 1=4x
+#define MBCCB_FORMAT_PARITYEN         (1u << MBCCB_FORMAT_PARITYEN_BIT)
+#define MBCCB_FORMAT_PARITYODD        (1u << MBCCB_FORMAT_PARITYODD_BIT)
 #define MBCCB_FORMAT_STOPBITS2        (1u << MBCCB_FORMAT_STOPBITS2_BIT)
-#define MBCCB_FORMAT_STOPBITS2_VAL(x) (((x) >> MBCCB_FORMAT_STOPBITS2_BIT) & 1u)
-#define MBCCB_FORMAT_IFSCALE         (1u << MBCCB_FORMAT_IFSCALE_BIT)
-#define MBCCB_FORMAT_IFSCALE_VAL(x)  (((x) >> MBCCB_FORMAT_IFSCALE_BIT) & 1u)
-#define MBCCB_FORMAT_DUPLEX          (1u << MBCCB_FORMAT_IFSCALE_BIT)
-#define MBCCB_FORMAT_DUPLEX_VAL(x)   (((x) >> MBCCB_FORMAT_IFSCALE_BIT) & 1u)
+#define MBCCB_FORMAT_IFSCALE          (1u << MBCCB_FORMAT_IFSCALE_BIT)
+#define MBCCB_FORMAT_DUPLEX           (1u << MBCCB_FORMAT_IFSCALE_BIT)
 
 // XXX: keep in sync with mesamodbus.py
 // Max one minute delay between init commands (in microseconds)
@@ -40,11 +33,10 @@
 typedef struct {
 	rtapi_u8	sig[8];		// Signature and version {'M','e','s','a','M','B','0','1'}
 	rtapi_u32	baudrate;
-	rtapi_u8	format;		// Parity and stopbits
-	rtapi_u8	txdelay;	// Tx inter-frame timeout (t3.5)
-	rtapi_u8	rxdelay;	// Rx inter-frame timeout (t3.5)
-	rtapi_u8	drvdelay;	// Delay from output enable to tx start
-	rtapi_u32	interval;	// Update rate in _micro_second interval time (0 = as-fast-as-possible)
+	rtapi_u16	format;		// Parity and stopbits
+	rtapi_u16	txdelay;	// Tx inter-frame timeout (t3.5)
+	rtapi_u16	rxdelay;	// Rx inter-frame timeout (t3.5)
+	rtapi_u16	drvdelay;	// Delay from output enable to tx start
 	rtapi_u32	unused[8];
 	rtapi_u32	initlen;	// Length of init section
 	rtapi_u32	cmdslen;	// Length of command section
@@ -62,7 +54,8 @@ typedef struct {
 	rtapi_u8	mtype;	// Modbus data type, 0 for init
 	rtapi_u16	flags;	// Mostly quirks to handle, see MBCCB_CMDF_* defines
 	rtapi_u16	unused1;
-	rtapi_u32	unused2[3];
+	rtapi_u32	unused2[2];
+	rtapi_u32	interval;// The interval to repeat this command, 0 for init
 	rtapi_u32	timeout; // Response timeout or delay in microseconds
 	rtapi_u32	dataptr; // Pin names, packet data for init
 } hm2_modbus_mbccb_cmds_t;
