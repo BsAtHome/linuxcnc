@@ -411,7 +411,7 @@ int hm2_pktuart_config(const char *name, const hm2_pktuart_config_t *rxcfg, cons
 	int i = hm2_get_pktuart(&hm2, name);
 	if(i < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
-		return -EINVAL;
+		return -ENODEV;
 	}
 
 	llio_noqueue_warn(hm2);
@@ -496,7 +496,7 @@ int hm2_pktuart_setup(const char *name, unsigned bitrate, rtapi_s32 tx_mode, rta
 	i = hm2_get_pktuart(&hm2, name);
 	if(i < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
-		return -EINVAL;
+		return -ENODEV;
 	}
 
 	llio_noqueue_warn(hm2);
@@ -585,7 +585,7 @@ int hm2_pktuart_send(const char *name, const unsigned char data[], rtapi_u8 *num
 	inst = hm2_get_pktuart(&hm2, name);
 	if(inst < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, inst);
-		return -EINVAL;
+		return -ENODEV;
 	}
 	if(hm2->pktuart.instance[inst].tx_bitrate == 0) {
 		HM2_ERR("%s has not been configured.\n", name);
@@ -681,7 +681,7 @@ int hm2_pktuart_read(const char *name, unsigned char data[], rtapi_u8 *num_frame
 	if(inst < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, inst);
 		*num_frames=0;
-		return -EINVAL;
+		return -ENODEV;
 	}
 	if(hm2->pktuart.instance[inst].rx_bitrate == 0 ) {
 		HM2_ERR("%s has not been configured.\n", name);
@@ -850,7 +850,7 @@ int hm2_pktuart_queue_get_frame_sizes(const char *name, rtapi_u32 fsizes[])
 
 	if(inst < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, inst);
-		return -EINVAL;
+		return -ENODEV;
 	}
 
 	if(hm2->pktuart.instance[inst].rx_bitrate == 0 ) {
@@ -893,7 +893,7 @@ int hm2_pktuart_queue_read_data(const char *name, rtapi_u32 data[], int bytes)
 
 	if(inst < 0) {
 		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, inst);
-		return -EINVAL;
+		return -ENODEV;
 	}
 	if(hm2->pktuart.instance[inst].rx_bitrate == 0 ) {
 		HM2_ERR("%s has not been configured.\n", name);
@@ -921,6 +921,10 @@ rtapi_u32 hm2_pktuart_get_rx_status(const char *name)
 {
 	hostmot2_t *hm2;
 	int i = hm2_get_pktuart(&hm2, name);
+	if(i < 0) {
+		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
+		return 0;
+	}
 	return hm2->pktuart.rx_status_reg[i];
 }
 EXPORT_SYMBOL_GPL(hm2_pktuart_get_rx_status);
@@ -932,6 +936,10 @@ rtapi_u32 hm2_pktuart_get_tx_status(const char *name)
 {
 	hostmot2_t *hm2;
 	int i = hm2_get_pktuart(&hm2, name);
+	if(i < 0) {
+		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
+		return 0;
+	}
 	return hm2->pktuart.tx_status_reg[i];
 }
 EXPORT_SYMBOL_GPL(hm2_pktuart_get_tx_status);
@@ -943,6 +951,10 @@ int hm2_pktuart_get_clock(const char* name)
 {
 	hostmot2_t *hm2;
 	int i = hm2_get_pktuart(&hm2, name);
+	if(i < 0) {
+		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
+		return -ENODEV;
+	}
 	hm2_pktuart_instance_t inst = hm2->pktuart.instance[i];
 	return inst.clock_freq;
 }
@@ -954,8 +966,12 @@ EXPORT_SYMBOL_GPL(hm2_pktuart_get_clock);
 int hm2_pktuart_get_version(const char* name)
 {
 	hostmot2_t *hm2;
-	hm2_get_pktuart(&hm2, name);
-	return hm2->pktuart.tx_version + 16 * hm2->pktuart.rx_version  ;
+	int i = hm2_get_pktuart(&hm2, name);
+	if(i < 0) {
+		HM2_ERR_NO_LL("Can not find PktUART instance %s (error %d).\n", name, i);
+		return -ENODEV;
+	}
+	return hm2->pktuart.tx_version + 16 * hm2->pktuart.rx_version;
 }
 EXPORT_SYMBOL_GPL(hm2_pktuart_get_version);
 
