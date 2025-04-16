@@ -798,35 +798,44 @@ wait_for_data_frame:
 			force_resend(inst);
 			break;
 		}
+		inst->rxdata[0] = 0;	// This will fail the parse packet if the read did not resolve
 		r = hm2_pktuart_queue_read_data(inst->uart, inst->rxdata, HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]));
 		if(r < 0)
 			MSG_ERR("%s: error: hm2_pktuart_queue_read_data() returned an error: %d\n", inst->name, r);	// What to do...
-		// The above queued read doesn't resolve until, at least, the next cycle.
+		// The above queued read doesn't resolve until the next cycle.
 		set_state(inst, STATE_WAIT_A_BIT);
 		break;
 
 	// FIXME: This state is effectively useless.
 	// The queued read in STATE_WAIT_FOR_FRAME_SIZES should have resolved
-	// immediately after returning in the process() function.
+	// immediately after ending this round and returning in the process()
+	// function.
 	case STATE_WAIT_A_BIT:
-		set_state(inst, STATE_WAIT_FOR_DATA);
-		break;
+		//set_state(inst, STATE_WAIT_FOR_DATA);
+		//break;
+		inst->state = STATE_WAIT_FOR_DATA;
+		/* Fallthrough */
 
 	case STATE_WAIT_FOR_DATA:
 		MSG_DBG("WAIT_FOR_DATA\n");
 		if(!inst->ignoredata)
 			parse_data_frame(inst);
-		if(HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[++(inst->frameidx)]) > 0) {
+		if(inst->frameidx < 16-1 && HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[++(inst->frameidx)]) > 0) {
 			// FIXME: We should never get multiple replies. Only one
 			// outstanding packet should be waiting for a reply.
 			MSG_WARN("%s: warning: Multiple data packets as reply? Maybe out-of-band? Command %d\n", inst->name, inst->cmdidx);
 			inst->ignoredata = 1;
 			set_state(inst, STATE_FETCH_MORE_DATA);
 		} else {
-			set_state(inst, STATE_WAIT_FOR_RX_CLEAR);
+			// We have received all frames from which we got frame size. If
+			// more (new) data is pending, then that will also be out-of-band.
+			// We can go to the start state and sort it out there.
+			set_state(inst, STATE_START);
+			*(inst->hal->fault) = 0;
 		}
 		break;
 
+#if 0
 	case STATE_WAIT_FOR_RX_CLEAR:
 		// FIXME: Do we need to wait here?
 #ifdef DEBUG_STATE
@@ -849,6 +858,7 @@ wait_for_data_frame:
 		set_state(inst, STATE_START);
 		*(inst->hal->fault) = 0;
 		break;
+#endif
 
 	case STATE_RESET_WAIT:
 		if(inst->timeout < 0)
