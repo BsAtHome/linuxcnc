@@ -1016,7 +1016,7 @@ def handleCommands(commands):
             else:
                 count = checkInt(cmd.attrib, 'count')
                 if None == count:
-                    perr("Invalid 'count' in {}".format(lcl))
+                    perr("Invalid or missing 'count' in {}".format(lcl))
                     continue
 
             if function in BITFUNCTIONS:
@@ -1071,7 +1071,7 @@ def handleCommands(commands):
                 pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lcl))
                 flags &= ~MBCCB_CMDF_SCALE & 0xffff
 
-            if ((0 == flags & MBCCB_CMDF_SCALE) and
+            if ((0 == (flags & MBCCB_CMDF_SCALE)) and
                        ((MBT_S == (mtype & MBT_T_MASK) and haltype in [HAL_U32, HAL_U64])
                      or (MBT_U == (mtype & MBT_T_MASK) and haltype in [HAL_S32, HAL_S64]))):
                 pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
