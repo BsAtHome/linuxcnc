@@ -353,22 +353,22 @@ static int config_rx(const char *name, const hostmot2_t *hm2, hm2_pktuart_instan
 	}
 	if(cfg->ifdelay > 0xff) {
 		if(hm2->pktuart.rx_version >= 3) {
-			mode |= HM2_PKTUART_TXMODE_IFSCALE;
+			mode |= HM2_PKTUART_RXMODE_IFSCALE;
 			if(cfg->ifdelay > 0x3fc)
-				mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+				mode |= HM2_PKTUART_RXMODE_INTERFRAMEDLY(0xff);
 			else
-				mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay >> 2);
+				mode |= HM2_PKTUART_RXMODE_INTERFRAMEDLY(cfg->ifdelay >> 2);
 		} else {
-			mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(0xff);
+			mode |= HM2_PKTUART_RXMODE_INTERFRAMEDLY(0xff);
 		}
 	} else {
-		mode |= HM2_PKTUART_TXMODE_INTERFRAMEDLY(cfg->ifdelay);
+		mode |= HM2_PKTUART_RXMODE_INTERFRAMEDLY(cfg->ifdelay);
 	}
 	mode |= HM2_PKTUART_RXMODE_RXFILTER(filter); // Low 8 bits
 	if(cfg->flags & HM2_PKTUART_CONFIG_RXMASKEN)  mode |= HM2_PKTUART_RXMODE_RXMASKEN;
 	if(cfg->flags & HM2_PKTUART_CONFIG_RXEN)      mode |= HM2_PKTUART_RXMODE_RXEN;
-	if(cfg->flags & HM2_PKTUART_CONFIG_PARITYEN)  mode |= HM2_PKTUART_TXMODE_PARITYEN;
-	if(cfg->flags & HM2_PKTUART_CONFIG_PARITYODD) mode |= HM2_PKTUART_TXMODE_PARITYODD;
+	if(cfg->flags & HM2_PKTUART_CONFIG_PARITYEN)  mode |= HM2_PKTUART_RXMODE_PARITYEN;
+	if(cfg->flags & HM2_PKTUART_CONFIG_PARITYODD) mode |= HM2_PKTUART_RXMODE_PARITYODD;
 	if(cfg->flags & HM2_PKTUART_CONFIG_STOPBITS2 && hm2->pktuart.rx_version >= 3)
 	mode |= HM2_PKTUART_RXMODE_STOPBITS2;
 

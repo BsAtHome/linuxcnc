@@ -14,12 +14,10 @@
 #define MBCCB_FORMAT_PARITYODD_BIT    1 // bits 1 Odd parity if set
 #define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2 0=8x1 1=8x2
 #define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3 Set for full-duplex (rx-mask off)
-#define MBCCB_FORMAT_IFSCALE_BIT      7 // bit  7 Inter-frame delay scale 0=1x, 1=4x
 #define MBCCB_FORMAT_PARITYEN         (1u << MBCCB_FORMAT_PARITYEN_BIT)
 #define MBCCB_FORMAT_PARITYODD        (1u << MBCCB_FORMAT_PARITYODD_BIT)
 #define MBCCB_FORMAT_STOPBITS2        (1u << MBCCB_FORMAT_STOPBITS2_BIT)
-#define MBCCB_FORMAT_IFSCALE          (1u << MBCCB_FORMAT_IFSCALE_BIT)
-#define MBCCB_FORMAT_DUPLEX           (1u << MBCCB_FORMAT_IFSCALE_BIT)
+#define MBCCB_FORMAT_DUPLEX           (1u << MBCCB_FORMAT_DUPLEX_BIT)
 
 // XXX: keep in sync with mesamodbus.py
 // Max one minute delay between init commands (in microseconds)
