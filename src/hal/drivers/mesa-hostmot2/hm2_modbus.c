@@ -147,11 +147,9 @@ enum {
 	STATE_WAIT_FOR_SEND_BEGIN,
 	STATE_WAIT_FOR_SEND_COMPLETE,
 	STATE_WAIT_FOR_DATA_FRAME,
-	STATE_WAIT_FOR_FRAME_SIZES,
-	STATE_WAIT_FOR_DATA,
+	STATE_FETCH_DATA,
 	STATE_FETCH_MORE_DATA,
-	STATE_WAIT_A_BIT,
-	STATE_WAIT_FOR_RX_CLEAR,
+	STATE_HANDLE_DATA,
 	STATE_RESET_WAIT,
 	STATE_LAST,
 };
@@ -163,11 +161,9 @@ static const char *state_names[] = {
 	"STATE_WAIT_FOR_SEND_BEGIN",
 	"STATE_WAIT_FOR_SEND_COMPLETE",
 	"STATE_WAIT_FOR_DATA_FRAME",
-	"STATE_WAIT_FOR_FRAME_SIZES",
-	"STATE_WAIT_FOR_DATA",
+	"STATE_FETCH_DATA",
 	"STATE_FETCH_MORE_DATA",
-	"STATE_WAIT_A_BIT",
-	"STATE_WAIT_FOR_RX_CLEAR",
+	"STATE_HANDLE_DATA",
 	"STATE_RESET_WAIT",
 	"STATE_LAST",
 };
@@ -766,12 +762,13 @@ wait_for_data_frame:
 		// Get the frame size(s)
 		if((r = hm2_pktuart_queue_get_frame_sizes(inst->uart, inst->fsizes)) < 0)
 			MSG_ERR("%s: error: hm2_pktuart_queue_get_frame_sizes() returned an error: %d\n", inst->name, r);
-		set_state(inst, STATE_WAIT_FOR_FRAME_SIZES);
+		set_state(inst, STATE_FETCH_DATA);
 		break;
 
-	case STATE_WAIT_FOR_FRAME_SIZES:
+	case STATE_FETCH_DATA:
 	case STATE_FETCH_MORE_DATA:
-		MSG_DBG("WAIT_FOR_FRAME_SIZES Index %u Frames 0x%04x 0x%04x 0x%04x 0x%04x\n",
+fetch_more_data:
+		MSG_DBG("FETCH_(MORE_)DATA Index %u Frames 0x%04x 0x%04x 0x%04x 0x%04x\n",
 			inst->frameidx, inst->fsizes[0], inst->fsizes[1], inst->fsizes[2], inst->fsizes[3]);
 		if(inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
 			MSG_WARN("%s: warning: reply to command %u had an error bit set in fsize (0x%04x), dropping\n",
@@ -803,21 +800,11 @@ wait_for_data_frame:
 		if(r < 0)
 			MSG_ERR("%s: error: hm2_pktuart_queue_read_data() returned an error: %d\n", inst->name, r);	// What to do...
 		// The above queued read doesn't resolve until the next cycle.
-		set_state(inst, STATE_WAIT_A_BIT);
+		set_state(inst, STATE_HANDLE_DATA);
 		break;
 
-	// FIXME: This state is effectively useless.
-	// The queued read in STATE_WAIT_FOR_FRAME_SIZES should have resolved
-	// immediately after ending this round and returning in the process()
-	// function.
-	case STATE_WAIT_A_BIT:
-		//set_state(inst, STATE_WAIT_FOR_DATA);
-		//break;
-		inst->state = STATE_WAIT_FOR_DATA;
-		/* Fallthrough */
-
-	case STATE_WAIT_FOR_DATA:
-		MSG_DBG("WAIT_FOR_DATA\n");
+	case STATE_HANDLE_DATA:
+		MSG_DBG("HANDLE_DATA\n");
 		if(!inst->ignoredata)
 			parse_data_frame(inst);
 		if(inst->frameidx < 16-1 && HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[++(inst->frameidx)]) > 0) {
@@ -826,6 +813,10 @@ wait_for_data_frame:
 			MSG_WARN("%s: warning: Multiple data packets as reply? Maybe out-of-band? Command %d\n", inst->name, inst->cmdidx);
 			inst->ignoredata = 1;
 			set_state(inst, STATE_FETCH_MORE_DATA);
+			// We do not need to wait for the next round. We can stuff a read
+			// immediately when we know that there is more data to fetch.
+			// Anyway, this scenario should not happen.
+			goto fetch_more_data;
 		} else {
 			// We have received all frames from which we got frame size. If
 			// more (new) data is pending, then that will also be out-of-band.
@@ -834,31 +825,6 @@ wait_for_data_frame:
 			*(inst->hal->fault) = 0;
 		}
 		break;
-
-#if 0
-	case STATE_WAIT_FOR_RX_CLEAR:
-		// FIXME: Do we need to wait here?
-#ifdef DEBUG_STATE
-		{
-			if(oldst != inst->state || oldrx != rxstatus || oldtx != txstatus) {
-				MSG_DBG("WAIT_FOR_RX_CLEAR rxstatus=0x%08x\r", rxstatus);
-				oldrx = rxstatus;
-				oldtx = txstatus;
-				oldst = inst->state;
-			}
-		}
-#endif
-		if(rxstatus & HM2_PKTUART_RXMODE_HASDATA) {
-			do_timeout(inst);
-			break;
-		}
-#ifdef DEBUG_STATE
-		MSG_DBG("\n");
-#endif
-		set_state(inst, STATE_START);
-		*(inst->hal->fault) = 0;
-		break;
-#endif
 
 	case STATE_RESET_WAIT:
 		if(inst->timeout < 0)
