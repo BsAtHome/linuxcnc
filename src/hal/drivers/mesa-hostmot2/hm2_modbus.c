@@ -2407,10 +2407,10 @@ int rtapi_app_main(void)
 		inst->hal->drvdelay = inst->mbccb->drvdelay;
 
 		inst->cfg_rx.filterrate = 0;	// Zero means 2 times baudrate
-		inst->cfg_rx.flags = HM2_PKTUART_CONFIG_RXEN;
+		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXEN;
 		if(!(inst->mbccb->format & MBCCB_FORMAT_DUPLEX))
 			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXMASKEN;	// Set rx masking is half-duplex
-		inst->cfg_tx.flags = HM2_PKTUART_CONFIG_DRIVEEN | HM2_PKTUART_CONFIG_DRIVEAUTO;
+		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_DRIVEEN | HM2_PKTUART_CONFIG_DRIVEAUTO;
 
 		if((retval = hm2_pktuart_get_version(inst->uart)) < 0) {
 			MSG_ERR("%s: error: Cannot get PktUART version (error=%d)\n", inst->name, retval);
