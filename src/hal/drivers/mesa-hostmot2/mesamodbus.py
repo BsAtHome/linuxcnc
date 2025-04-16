@@ -115,12 +115,10 @@ MBCCB_FORMAT_PARITYEN_BIT  = 0 # bits 0 Enable parity if set
 MBCCB_FORMAT_PARITYODD_BIT = 1 # bits 1 Odd parity if set
 MBCCB_FORMAT_STOPBITS2_BIT = 2 # bit  2 0=8x1 1=8x2
 MBCCB_FORMAT_DUPLEX_BIT    = 3 # bit  3 Set for full-duplex (rx-mask off)
-MBCCB_FORMAT_IFSCALE_BIT   = 7 # bit  7 Inter-frame delay scale 0=1x, 1=4x
 MBCCB_FORMAT_PARITYEN      = (1 << MBCCB_FORMAT_PARITYEN_BIT)
 MBCCB_FORMAT_PARITYODD     = (1 << MBCCB_FORMAT_PARITYODD_BIT)
 MBCCB_FORMAT_STOPBITS2     = (1 << MBCCB_FORMAT_STOPBITS2_BIT)
-MBCCB_FORMAT_IFSCALE       = (1 << MBCCB_FORMAT_IFSCALE_BIT)
-MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_IFSCALE_BIT)
+MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_DUPLEX_BIT)
 
 # Default parameters for serial communication.
 # These can be overridden in the root tag as attributes.
