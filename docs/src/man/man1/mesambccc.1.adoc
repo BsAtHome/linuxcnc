@@ -1,16 +1,16 @@
-= mesamodbus(1)
+= mesambccc(1)
 
 == NAME
 
-mesamodbus - Utility for compiling hm2_modbus command control description files
+mesambccc - Utility for compiling hm2_modbus command control description files
 
 == SYNOPSIS
 
-*mesamodbus* [_-h_|_--help_] [_-v_|_--verbose_] [_-o_ file|_--output_=file] <filename.source.mbccs>
+*mesambccc* [_-h_|_--help_] [_-v_|_--verbose_] [_-o_ file|_--output_=file] <filename.source.mbccs>
 
 == DESCRIPTION
 
-The *mesamodbus* utility is used to compile hm2_modbus driver command control
+The *mesambccc* utility is used to compile hm2_modbus driver command control
 description files for running Modbus devices with Mesa cards using the
 PktUARTs. The MBCCS source file is an XML formatted document which describes
 the devices connected and commands to issue to the PktUART port using the
