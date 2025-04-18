@@ -95,8 +95,10 @@ import re
 import struct
 
 # HAL names are a bit picky
-pinpattern  = re.compile("^[a-z][a-z0-9-.]*[a-z0-9]$")
-namepattern = re.compile("^[a-z][a-z0-9-]*[a-z0-9]$")
+# The following allows, for example, device names "xyz" but also "xyz.0" and
+# "xyz.1". It allows for multiple identical devices on different IDs and pin
+# hierarchies.
+pinpattern  = re.compile("^[a-z][a-z0-9-.]*[a-z0-9]*$")
 
 devices  = None    # The list of devices
 
@@ -174,7 +176,7 @@ MBT_EFGHABCD = 0x0a
 MBT_FEHGBADC = 0x0b
 MBT_GHEFCDAB = 0x0c
 MBT_HGFEDCBA = 0x0d
-MBTBYTESIZES = [2, 2, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8]
+MBTBYTESIZES = [2, 2, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 2, 2] # 16 entries
 
 MBT_U        = 0x00
 MBT_S        = 0x10
@@ -289,19 +291,22 @@ FUNCNAMES = { R_COILS: 'R_COILS', R_INPUTREGS: 'R_INPUTREGS', R_INPUTS: 'R_INPUT
 WRITEFUNCTIONS = [ 'W_COIL', 'W_REGISTER', 'W_COILS', 'W_REGISTERS' ]
 
 # These functions always use HAL_BIT
+# Also, the function is a register function if /not/ in this set
 BITFUNCTIONS = [R_COILS, R_INPUTS, W_COIL, W_COILS]
-
+REGFUNCTIONS = [R_REGISTERS, R_INPUTREGS, W_REGISTER, W_REGISTERS]
 
 # Command flags for handling quirks and options
 # XXX: keep in sync with hm2_modbus.h
+MBCCB_PINF_SCALE    = 0x0001
+MBCCB_PINF_CLAMP    = 0x0002
+MBCCB_PINF_MASK     = 0x0003 # sum of pin flags
+
 MBCCB_CMDF_TIMESOUT = 0x0001
 MBCCB_CMDF_BCANSWER = 0x0002
 MBCCB_CMDF_NOANSWER = 0x0004
-MBCCB_CMDF_SCALE    = 0x0008
-MBCCB_CMDF_CLAMP    = 0x0010
-MBCCB_CMDF_RESEND   = 0x0020
+MBCCB_CMDF_RESEND   = 0x0008
 MBCCB_CMDF_INITMASK = 0x0007 # sum of allowed flags in init
-MBCCB_CMDF_MASK     = 0x003f # sum of all above flags
+MBCCB_CMDF_MASK     = 0x000f # sum of all above flags
 
 # Allowed attributes in <mesamodbus>
 MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'interval', 'parity',
@@ -314,7 +319,8 @@ CMDSATTRIB = [ 'address',     'bcanswer', 'clamp',   'count',    'delay',
                'timeoutbits', 'timesout' ]
 
 # Allowed attributes in <commands>/<command>/<pin>
-PINSATTRIB = [ 'name' ]
+PINSATTRIB = [ 'clamp', 'name', 'haltype', 'modbustype', 'scale' ]
+SKIPATTRIB = [ 'skip' ]
 
 # Allowed attributes in <initlist>/<command>
 INITATTRIB = [ 'address',  'bcanswer', 'count',   'delay',       'device',
@@ -323,13 +329,17 @@ INITATTRIB = [ 'address',  'bcanswer', 'count',   'delay',       'device',
 # Allowed attributes in <initlist>/<command>/<data>
 DATAATTRIB = [ 'modbustype', 'value' ]
 
+# Allowed attributes in <*>/<command delay="...">
+DELAYATTRIB = [ 'device', 'delay']
+
 #
 # Program invocation message
 #
 def usage():
-    print("""Build hm2_modbus binary control command file from XML source description.
+    print("""Mesa Modbus control command compiler.
+Build hm2_modbus binary control command file from XML source description.
 Usage:
-  mesamodbus [-h] [-o outfile] infile.mbccs
+  mesambccc [-h] [-o outfile] infile.mbccs
 
 Options:
   -h|--help              This message
@@ -442,11 +452,18 @@ def mangle64(d, mtype):
 #
 # Create a list of flags
 #
-def flagList(flags):
+def cflagList(flags):
     if 0 == flags:
         return "<none>"
-    l = ['timesout', 'bcanswer', 'noanswer', 'scale', 'clamp', 'resend']
-    return ','.join([l[v] for v in range(len(l)) if flags & (1 << v)])
+    l = { MBCCB_CMDF_TIMESOUT: 'timesout', MBCCB_CMDF_BCANSWER: 'bcanswer',
+          MBCCB_CMDF_NOANSWER: 'noanswer', MBCCB_CMDF_RESEND:   'resend' }
+    return ','.join([l[v] for v in l.keys() if flags & v])
+
+def pflagList(flags):
+    if 0 == flags:
+        return "<none>"
+    l = { MBCCB_PINF_SCALE: 'scale', MBCCB_PINF_CLAMP: 'clamp' }
+    return ','.join([l[v] for v in l.keys() if flags & v])
 
 #
 # Merge and check comms config from root element attributes
@@ -540,7 +557,7 @@ def handleDevices(devs):
             perr("Missing 'name' attribute in {}".format(ldl))
             continue
         name = dev.attrib['name']
-        if not namepattern.match(name):
+        if not pinpattern.match(name):
             perr("Attribute 'name' contains invalid characters {}".format(ldl))
             continue
         if len(name) > MAXPINNAME:
@@ -580,22 +597,37 @@ def handleDevices(devs):
     return devlist
 
 #
+# Get a boolean value
+#
+def getBoolean(attrib, name):
+    if name not in attrib:
+        return None
+    a = attrib[name].upper()
+    if 'T' == a or 'TRUE' == a or '1' == a:
+        return True
+    if 'F' == a or 'FALSE' == a or '0' == a:
+        return False
+    pwarn("Expected boolean value in attribute '{}'".format(attrib[name]))
+    return False
+
+#
 # Parse optional attribute flags
 #
-def parseOptFlags(dev, attrs, defflags):
-    flags = defflags
-    flags |= MBCCB_CMDF_TIMESOUT if 'timesout' in attrs and attrs['timesout'] == '1' else 0
-    flags |= MBCCB_CMDF_BCANSWER if 'bcanswer' in attrs and attrs['bcanswer'] == '1' else 0
-    flags |= MBCCB_CMDF_NOANSWER if 'noanswer' in attrs and attrs['noanswer'] == '1' else 0
-    flags |= MBCCB_CMDF_SCALE    if 'scale'    in attrs and attrs['scale']    == '1' else 0
-    flags |= MBCCB_CMDF_CLAMP    if 'clamp'    in attrs and attrs['clamp']    == '1' else 0
-    flags |= MBCCB_CMDF_RESEND   if 'resend'   in attrs and attrs['resend']   == '1' else 0
+def parseOptFlags(dev, attrs, defcflags, defpflags):
+    cflags = defcflags
+    cflags |= MBCCB_CMDF_TIMESOUT if getBoolean(attrs, 'timesout') else 0
+    cflags |= MBCCB_CMDF_BCANSWER if getBoolean(attrs, 'bcanswer') else 0
+    cflags |= MBCCB_CMDF_NOANSWER if getBoolean(attrs, 'noanswer') else 0
+    cflags |= MBCCB_CMDF_RESEND   if getBoolean(attrs, 'resend')   else 0
     # Scale and clamp can be default on. This allows them to be turned off.
-    flags &= (~MBCCB_CMDF_SCALE & 0xffff) if 'scale' in attrs and attrs['scale'] == '0' else 0xffff
-    flags &= (~MBCCB_CMDF_CLAMP & 0xffff) if 'clamp' in attrs and attrs['clamp'] == '0' else 0xffff
-    if 'broadcast' != dev and 0 != (flags & MBCCB_CMDF_BCANSWER):
+    pflags = defpflags
+    pflags |= MBCCB_PINF_SCALE  if getBoolean(attrs, 'scale')     else 0
+    pflags |= MBCCB_PINF_CLAMP  if getBoolean(attrs, 'clamp')     else 0
+    pflags &= ~MBCCB_PINF_SCALE if not getBoolean(attrs, 'scale') else ~0
+    pflags &= ~MBCCB_PINF_CLAMP if not getBoolean(attrs, 'clamp') else ~0
+    if 'broadcast' != dev and 0 != (cflags & MBCCB_CMDF_BCANSWER):
         perr("Cannot use 'bcanswer' attribute on non-broadcast target '{}'".format(dev));
-    return flags
+    return (cflags, pflags)
 
 #
 # Calculate the timeout for a command based on the number of bytes
@@ -629,6 +661,56 @@ def calcTimeout(function, count, mtype):
     return int((2 * bits * 1000000.0 + configparams['baudrate'] - 1) / configparams['baudrate']) + 2*8000
 
 #
+# Extract the 'timeout' or 'timeoutbits' attribute and return the timeout value
+# or the global default.
+#
+def getTimeout(attrib, ers):
+    if 'timeout' in attrib:
+        # A specific timeout for this command
+        tov = checkInt(attrib, 'timeout')
+        if None == tov or tov < 0 or tov > MAXDELAY:
+            perr("Attribute 'timeout' out of range [0..{}] in {}".format(MAXDELAY, ers))
+            return None
+        if 'timeoutbits' in attrib:
+            pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(ers))
+    elif 'timeoutbits' in attrib:
+        tob = checkInt(attrib, 'timeoutbits')
+        if None == tob or tob < 0 or tob > MAXDELAYBITS:
+            perr("Attribute 'timeoutbits' out of range [0..{}] in {}".format(MAXDELAYBITS, ers))
+            return None
+        tov = math.ceil(tob * 1000000.0 / configparams['baudrate'])
+    else:
+        tov = configparams['timeout']   # Use global timeout
+    return tov
+
+#
+# Get the device name
+#
+def getDevice(attrib, ers):
+    if 'device' not in attrib:
+        perr("Attribute 'device' missing in {}".format(ers))
+        return None
+    # Device must be known
+    dev = attrib['device']
+    if dev not in devices:
+        perr("Device name '{}' not found in devices list {}".format(device, ers))
+        return None
+    return dev
+
+#
+# Get the target Modbus address
+#
+def getAddress(attrib, ers):
+    addr = checkInt(attrib, 'address')
+    if None == addr:
+        perr("Attribute 'address' invalid or missing in {}".format(ers))
+        return None
+    if addr < 0 or addr > 65535:
+        perr("Address '{}' out of range [0..65535] in {}".format(addr, ers))
+        return None
+    return addr
+
+#
 # Check the allowed attributes for a tag
 #
 def checkAttribs(have, may, suffix):
@@ -647,10 +729,9 @@ def handleInits(inits):
             perr("Expected <command> tag as child of {}".format(lil))
             continue
 
-        checkAttribs(cmd.attrib, INITATTRIB, lil)
-
         if 'delay' in cmd.attrib:
             # A delay between init commands
+            checkAttribs(cmd.attrib, DELAYATTRIB, lil)
             delay = checkInt(cmd.attrib, 'delay')
             if None == delay or delay < 0 or delay > MAXDELAY:
                 perr("Attribute 'delay' out of range [0..{}] in {}".format(MAXDELAY, lil))
@@ -658,270 +739,277 @@ def handleInits(inits):
             initlist.append({'delay': delay})
             if verbose:
                 print("Init {:2}: delay {} microseconds".format(len(initlist), delay))
-        else:
-            # An init command
-            if 'device' not in cmd.attrib:
-                perr("Attribute 'device' missing in {}".format(lil))
-                continue
+            continue
 
-            # Device must be known
-            device = cmd.attrib['device']
-            if device not in devices:
-                perr("Device name '{}' not found in devices list {}".format(device, lil))
-                continue
-            if 'function' not in cmd.attrib:
-                perr("Attribute 'function' missing in {}".format(lil))
-                continue
+        # An init command
+        checkAttribs(cmd.attrib, INITATTRIB, lil)
 
-            # Get optional attrib flags
-            flags = parseOptFlags(device, cmd.attrib, 0)
-            if 0 != flags & ~MBCCB_CMDF_INITMASK:
-                pwarn("Additional flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(flags, MBCCB_CMDF_INITMASK, lil))
+        # Must have a device
+        device = getDevice(cmd.attrib, lil)
+        if None == device:
+            continue
 
-            # Find timeout to use
-            if 'timeout' in cmd.attrib:
-                # A specific timeout for this command
-                timeout = checkInt(cmd.attrib, 'timeout')
-                if None == timeout or timeout < 0 or timeout > MAXDELAY:
-                    perr("Attribute 'timeout' out of range [0..{}] {}".format(MAXDELAY, lil))
-                    continue
-                if 'timeoutbits' in cmd.attrib:
-                    pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(lil))
-            elif 'timeoutbits' in cmd.attrib:
-                tob = checkInt(cmd.attrib, 'timeoutbits')
-                if None == tob or tob < 0 or tob > MAXDELAYBITS:
-                    perr("Attribute 'timeoutbits' out of range [0..{}] {}".format(MAXDELAYBITS, lil))
-                    continue
-                timeout = math.ceil(tob * 1000000.0 / configparams['baudrate'])
-            else:
-                timeout = configparams['timeout']   # Use global timeout
+        # Get optional attrib flags
+        (cflags, pflags) = parseOptFlags(device, cmd.attrib, 0, 0)
+        if 0 != cflags & ~MBCCB_CMDF_INITMASK:
+            pwarn("Additional flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_INITMASK, lil))
 
-            # Must have a function
-            # Only functions tagged are allowed
-            function = cmd.attrib['function'].upper()
-            if function not in FUNCTIONS:
-                perr("Function '{}' out of range {} in {}".format(function, str(list(FUNCTIONS.keys())), lil))
-                continue
-            maxcount = FUNCTIONS[function][1]
-            function = FUNCTIONS[function][0]
+        # Find timeout to use
+        timeout = getTimeout(cmd.attrib,lil)
+        if None == timeout:
+            continue
 
-            # Need a target address
-            address  = checkInt(cmd.attrib, 'address')
-            if None == address:
-                perr("Attribute 'address' invalid or missing in {}".format(lil))
-                continue
-            if address < 0 or address > 65535:
-                perr("Address '{}' out of range [0..65535] in {}".format(address, lil))
-                continue
+        # Must have a function
+        if 'function' not in cmd.attrib:
+            perr("Attribute 'function' missing in {}".format(lil))
+            continue
+        # Only known functions are allowed
+        function = cmd.attrib['function'].upper()
+        if function not in FUNCTIONS:
+            perr("Function '{}' out of range {} in {}".format(function, str(list(FUNCTIONS.keys())), lil))
+            continue
+        maxcount = FUNCTIONS[function][1]
+        function = FUNCTIONS[function][0]
 
-            # Data to be sent with the command
-            datalist = []
-            dlnbytes = 0;
-            err = False
-            for data in cmd:
-                ldl = "{}/data[{}]".format(lil, (1 + len(datalist)))
-                if data.tag == 'description':
-                    continue    # Ignored
-                if data.tag != 'data':
-                    perr("Expected <data> tag instead of '{}' as child in {}".format(data.tag, lil))
+        # Need a target address
+        address = getAddress(cmd.attrib, lil)
+        if None == address:
+            continue
+
+        # Data to be sent with the command
+        datalist = []
+        dlnbytes = 0;
+        err = False
+        for data in cmd:
+            ldl = "{}/data[{}]".format(lil, (1 + len(datalist)))
+            if data.tag == 'description':
+                continue    # Ignored
+            if data.tag != 'data':
+                perr("Expected <data> tag instead of '{}' as child in {}".format(data.tag, lil))
+                err = True
+                break
+
+            checkAttribs(data.attrib, DATAATTRIB, ldl)
+
+            # Write function must have data
+            if FUNCNAMES[function] not in WRITEFUNCTIONS:
+                perr("Only write function can have <data> tag(s) in {}".format(data.tag, lil))
+                err = True
+                break
+            # Get the type of the data
+            mtype = data.attrib['modbustype'] if 'modbustype' in data.attrib else 'U_AB'
+            if mtype not in MBTYPES:
+                perr("Invalid modbustype '{}' in {}".format(mtype, lil))
+                err = True
+                break
+            mtype = MBTYPES[mtype][0]
+
+            if MBT_F == (mtype & MBT_T_MASK):
+                # Handle floating point target
+                if function not in [W_REGISTER, W_REGISTERS]:
+                    perr("Floating point data only possible for W_REGISTER(6)/W_REGISTERS(16) functions in {}".format(ldl))
+                    err = True
+                    break
+                if W_REGISTER == function and mtype not in [F_AB, F_BA]:
+                    perr("Floating point value requires 16-bit type for W_REGISTER/6) in {}".format(ldl))
                     err = True
                     break
 
-                checkAttribs(data.attrib, DATAATTRIB, ldl)
-
-                # Write function must have data
-                if FUNCNAMES[function] not in WRITEFUNCTIONS:
-                    perr("Only write function can have <data> tag(s) in {}".format(data.tag, lil))
+                value = checkFlt(data.attrib, 'value')
+                if None == value:
+                    perr("Attribute 'value' invalid or missing in {}".format(ldl))
                     err = True
                     break
-                # Get the type of the data
-                mtype = data.attrib['modbustype'] if 'modbustype' in data.attrib else 'U_AB'
-                if mtype not in MBTYPES:
-                    perr("Invalid modbustype '{}' in {}".format(mtype, lil))
+                if mtype in [F_AB, F_BA]:
+                    # 16-bit float
+                    if value < -65504.0 or value > 65504.0:
+                        perr("Attribute 'value' out of range [-65504.0,+65504.0] for 16-bit float {}".format(ldl))
+                        err = True
+                        break
+                    datalist.append(mangle16(struct.pack(">e", value), mtype))
+                    dlnbytes += 2
+                elif mtype in [F_ABCD, F_BADC, F_CDAB, F_DCBA]:
+                    # 32-bit float
+                    if value <= -3.4e38 or value >= +3.4e38:    # +/- 3.4028234664e38
+                        perr("Attribute 'value' out of range [-3.4e38,+3.4e38] for 32-bit float {}".format(ldl))
+                        err = True
+                        break
+                    datalist.append(mangle32(struct.pack(">f", value), mtype))
+                    dlnbytes += 4
+                else: # value is fine, otherwise we'd get an OverflowError on conversion
+                    # 64-bit float
+                    # XXX: +/inf and NaN are also fine?
+                    datalist.append(mangle64(struct.pack(">d", value), mtype))
+                    dlnbytes += 8
+            else: # no modbustype attribute or MBT_U or MBT_S
+                value = checkInt(data.attrib, 'value')
+                if None == value:
+                    perr("Attribute 'value' invalid or missing in {}".format(ldl))
                     err = True
                     break
-                mtype = MBTYPES[mtype][0]
-
-                if MBT_F == (mtype & MBT_T_MASK):
-                    # Handle floating point target
-                    if function not in [W_REGISTER, W_REGISTERS]:
-                        perr("Floating point data only possible for W_REGISTER(6)/W_REGISTERS(16) functions in {}".format(ldl))
+                # Write single coil usually has special value
+                # We allow deviation because some devices allow it too
+                if W_COIL == function:
+                    if 'modbustype' in data.attrib or mtype != U_AB:
+                        pwarn("Attribute 'modbustype' ignored for W_COIL(5) and always set to U_AB in {}".format(ldl))
+                    if value != 0 and value != 0xff00:
+                        pwarn("Data value '{}' for W_COIL(5) is normally expected to be 0 or 0xff00 (65280) in {}".format(value, ldl))
+                    datalist.append(struct.pack('>H', value));
+                    dlnbytes += 2
+                elif W_COILS == function:
+                    if 'modbustype' in data.attrib or mtype != U_AB:
+                        perr("Attribute 'modbustype' ignored for W_COILS(15) and always set to binary bits in {}".format(ldl))
                         err = True
-                        break
-                    if W_REGISTER == function and mtype not in [F_AB, F_BA]:
-                        perr("Floating point value requires 16-bit type for W_REGISTER/6) in {}".format(ldl))
+                        break;
+                    if value not in [0, 1]:
+                        perr("Function W_COILS(15) only accepts binary data in range [0,1] in {}".format(ldl))
                         err = True
-                        break
-
-                    value = checkFlt(data.attrib, 'value')
-                    if None == value:
-                        perr("Attribute 'value' invalid or missing in {}".format(ldl))
+                        break;
+                    datalist.append(struct.pack('>B', value));
+                    dlnbytes += 1
+                elif W_REGISTER == function:
+                    if mtype not in [U_AB, U_BA, S_AB, S_BA]:
+                        perr("Attribute 'modbustype' invalid for W_REGISTER(6), expected one of (U_AB,U_BA,S_AB,S_BA) in {}".format(ldl))
                         err = True
-                        break
-                    if mtype in [F_AB, F_BA]:
-                        # 16-bit float
-                        if value < -65504.0 or value > 65504.0:
-                            perr("Attribute 'value' out of range [-65504.0,+65504.0] for 16-bit float {}".format(ldl))
+                        break;
+                    if mtype in [U_AB, U_BA]:
+                        # 16-bit unsigned
+                        if value < 0 or value > 65535:
+                            perr("Value '{}' outside valid range [0,65535] for W_REGISTER(6) in {}".format(value, ldl))
                             err = True
-                            break
-                        datalist.append(mangle16(struct.pack(">e", value), mtype))
+                            break;
+                        datalist.append(mangle16(struct.pack('>H', value), mtype));
                         dlnbytes += 2
-                    elif mtype in [F_ABCD, F_BADC, F_CDAB, F_DCBA]:
-                        # 32-bit float
-                        if value <= -3.4e38 or value >= +3.4e38:    # +/- 3.4028234664e38
-                            perr("Attribute 'value' out of range [-3.4e38,+3.4e38] for 32-bit float {}".format(ldl))
+                    else:
+                        # 16-bit signed
+                        if value < -32768 or value > +32767:
+                            perr("Value '{}' outside valid range [-32768,+32767] for W_REGISTER(6) in {}".format(value, ldl))
                             err = True
-                            break
-                        datalist.append(mangle32(struct.pack(">f", value), mtype))
+                            break;
+                        datalist.append(mangle16(struct.pack('>h', value), mtype));
+                        dlnbytes += 2
+                else: # function == W_REGISTERS
+                    if mtype in [U_AB, U_BA]:
+                        # 16-bit unsigned
+                        if value < 0 or value > 65535:
+                            perr("Value '{}' outside valid range [0,65535] for W_REGISTER(6) in {}".format(value, ldl))
+                            err = True
+                            break;
+                        datalist.append(mangle16(struct.pack('>H', value), mtype));
+                        dlnbytes += 2
+                    elif mtype in [S_AB, S_BA]:
+                        # 16-bit signed
+                        if value < -32768 or value > +32767:
+                            perr("Value '{}' outside valid range [-32768,+32767] for W_REGISTER(16) in {}".format(value, ldl))
+                            err = True
+                            break;
+                        datalist.append(mangle16(struct.pack('>h', value), mtype));
+                        dlnbytes += 2
+                    elif mtype in [U_ABCD, U_BADC, U_CDAB, U_DCBA]:
+                        # 32-bit unsigned
+                        if value < 0 or value > 0xffffffff:
+                            perr("Value '{}' outside valid range [0,4294967295] for W_REGISTERS(16) in {}".format(value, ldl))
+                            err = True
+                            break;
+                        datalist.append(mangle32(struct.pack(">I", value), mtype))
                         dlnbytes += 4
-                    else: # value is ok. otherwise we'd get an OverflowError on conversion
-                        # 64-bit float
-                        # XXX: +/inf and NaN are also fine?
-                        datalist.append(mangle64(struct.pack(">d", value), mtype))
+                    elif mtype in [S_ABCD, S_BADC, S_CDAB, S_DCBA]:
+                        # 32-bit signed
+                        if value < -2147483648 or value > +2147483647:
+                            perr("Value '{}' outside valid range [-2147483648,+2147483647] for W_REGISTERS(16) in {}".format(value, ldl))
+                            err = True
+                            break;
+                        datalist.append(mangle32(struct.pack(">i", value), mtype))
+                        dlnbytes += 4
+                    elif MBT_S == mtype & MBT_T_MASK:
+                        # 64-bit signed
+                        if value < 0x8000000000000000 or value > 0x7fffffffffffffff:
+                            perr("Value '{}' outside valid 64-bit range [{},{}] for W_REGISTERS(16) in {}"
+                                    .format(value, 0x8000000000000000, 0x7fffffffffffffff, ldl))
+                            err = True
+                            break;
+                        datalist.append(mangle64(struct.pack(">q", value), mtype))
                         dlnbytes += 8
-                else: # no modbustype attribute or MBT_U or MBT_S
-                    value = checkInt(data.attrib, 'value')
-                    if None == value:
-                        perr("Attribute 'value' invalid or missing in {}".format(ldl))
-                        err = True
-                        break
-                    # Write single coil usually has special value
-                    # We allow deviation because some devices allow it too
-                    if W_COIL == function:
-                        if 'modbustype' in data.attrib or mtype != U_AB:
-                            pwarn("Attribute 'modbustype' ignored for W_COIL(5) and always set to U_AB in {}".format(ldl))
-                        if value != 0 and value != 0xff00:
-                            pwarn("Data value '{}' for W_COIL(5) is normally expected to be 0 or 0xff00 (65280) in {}".format(value, ldl))
-                        datalist.append(struct.pack('>H', value));
-                        dlnbytes += 2
-                    elif W_COILS == function:
-                        if 'modbustype' in data.attrib or mtype != U_AB:
-                            perr("Attribute 'modbustype' ignored for W_COILS(15) and always set to binary bits in {}".format(ldl))
+                    else: # MBT_U == mtype & MBT_T_MASK
+                        # 64-bit unsigned
+                        if value > 0xffffffffffffffff:
+                            perr("Value '{}' outside valid 64-bit range [0,{}] for W_REGISTERS(16) in {}"
+                                    .format(value, 0xffffffffffffffff, ldl))
                             err = True
                             break;
-                        if 0 != value and 1 != value:
-                            perr("Function W_COILS(15) only accepts binary data in range [0,1] in {}".format(ldl))
-                            err = True
-                            break;
-                        datalist.append(struct.pack('>B', value));
-                        dlnbytes += 1
-                    elif W_REGISTER == function:
-                        if mtype not in [U_AB, U_BA, S_AB, S_BA]:
-                            perr("Attribute 'modbustype' invalid for W_REGISTER(6), expected one of (U_AB,U_BA,S_AB,S_BA) in {}".format(ldl))
-                            err = True
-                            break;
-                        if mtype in [U_AB, U_BA]:
-                            # 16-bit unsigned
-                            if value < 0 or value > 65535:
-                                perr("Value '{}' outside valid range [0,65535] for W_REGISTER(6) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle16(struct.pack('>H', value), mtype));
-                            dlnbytes += 2
-                        else:
-                            # 16-bit signed
-                            if value < -32768 or value > +32767:
-                                perr("Value '{}' outside valid range [-32768,+32767] for W_REGISTER(6) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle16(struct.pack('>h', value), mtype));
-                            dlnbytes += 2
-                    else: # function == W_REGISTERS
-                        if mtype in [U_AB, U_BA]:
-                            # 16-bit unsigned
-                            if value < 0 or value > 65535:
-                                perr("Value '{}' outside valid range [0,65535] for W_REGISTER(6) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle16(struct.pack('>H', value), mtype));
-                            dlnbytes += 2
-                        elif mtype in [S_AB, S_BA]:
-                            # 16-bit signed
-                            if value < -32768 or value > +32767:
-                                perr("Value '{}' outside valid range [-32768,+32767] for W_REGISTER(16) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle16(struct.pack('>h', value), mtype));
-                            dlnbytes += 2
-                        elif mtype in [U_ABCD, U_BADC, U_CDAB, U_DCBA]:
-                            # 32-bit unsigned
-                            if value < 0 or value > 0xffffffff:
-                                perr("Value '{}' outside valid range [0,4294967295] for W_REGISTERS(16) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle32(struct.pack(">I", value), mtype))
-                            dlnbytes += 4
-                        elif mtype in [S_ABCD, S_BADC, S_CDAB, S_DCBA]:
-                            # 32-bit signed
-                            if value < -2147483648 or value > +2147483647:
-                                perr("Value '{}' outside valid range [-2147483648,+2147483647] for W_REGISTERS(16) in {}".format(value, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle32(struct.pack(">i", value), mtype))
-                            dlnbytes += 4
-                        elif MBT_S == mtype & MBT_T_MASK:
-                            # 64-bit signed
-                            if value < 0x8000000000000000 or value > 0x7fffffffffffffff:
-                                perr("Value '{}' outside valid 64-bit range [{},{}] for W_REGISTERS(16) in {}"
-                                        .format(value, 0x8000000000000000, 0x7fffffffffffffff, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle64(struct.pack(">q", value), mtype))
-                            dlnbytes += 8
-                        else: # MBT_U == mtype & MBT_T_MASK
-                            # 64-bit unsigned
-                            if value > 0xffffffffffffffff:
-                                perr("Value '{}' outside valid 64-bit range [0,{}] for W_REGISTERS(16) in {}"
-                                        .format(value, 0xffffffffffffffff, ldl))
-                                err = True
-                                break;
-                            datalist.append(mangle64(struct.pack(">Q", value), mtype))
-                            dlnbytes += 8
-                    # end if [functions]
-                # end if MBT_x types
-            # end for data in cmd:
-            if err:
-                continue
+                        datalist.append(mangle64(struct.pack(">Q", value), mtype))
+                        dlnbytes += 8
+                # end if [functions]
+            # end if MBT_x types
+        # end for data in cmd:
+        if err:
+            continue
 
-            # Read functions must have a count
-            if function not in WRITEFUNCTIONS:
-                if function in [R_COILS, R_REGISTERS, R_INPUTREGS]:
-                    if count < 1 or count > maxcount:
-                        print("Attribute 'count' '{}' out of range [1-{}] in {}".format(count, maxcount, lil))
-                        continue
-                else:
-                    count = 1
+        # Read functions must have a count
+        if function not in WRITEFUNCTIONS:
+            if function in [R_COILS, R_REGISTERS, R_INPUTREGS]:
+                count = checkInt(cmd.attrib, 'count')
+                if None == count:
+                    print("Attribute 'count' is missing or invalid in {}".format(lil))
+                    continue
             else:
-                count = dlnbytes // 2 if function != R_COILS else dlnbytes
+                count = 1
+        else:
+            count = dlnbytes // 2 if function != R_COILS else dlnbytes
 
-            # We cannot write beyond the address region in multi-writes
-            if address + maxcount > 65536:
-                maxcount = 65536 - address
+        # We cannot write beyond the address region in multi-writes
+        if address + maxcount > 65536:
+            maxcount = 65536 - address
 
-            if W_COILS != function and 0 != dlnbytes & 1:
-                perr("Odd number of data bytes for function {}({}) in {}".format(FUNCNAMES[function], function, lil))
-                continue
+        if W_COILS != function and 0 != dlnbytes & 1:
+            perr("Odd number of data bytes for function {}({}) in {}".format(FUNCNAMES[function], function, lil))
+            continue
 
-            if count < 1 or count > maxcount:
-                perr("Data element count '{}' is out of range [1..{}] for function {}({}) in {}"
-                     .format(b, maxcount, FUNCNAMES[function], function, lil))
-                continue
+        if count < 1 or count > maxcount:
+            perr("Data element count '{}' is out of range [1..{}] for function {}({}) in {}"
+                 .format(b, maxcount, FUNCNAMES[function], function, lil))
+            continue
 
-            if 0 == timeout:
-                timeout = calcTimeout(function, count, MBT_AB);
+        if 0 == timeout:
+            timeout = calcTimeout(function, count, MBT_AB);
 
-            initlist.append({'device': device, 'mbid': devices[device], 'function': function,
-                             'address': address, 'data': datalist, 'timeout': timeout, 'flags': flags })
-            if verbose:
-                print("Init {:2}: {} {}({}) addr=0x{:04x} flags={} timeout={} data="
-                      .format(len(initlist), device, FUNCNAMES[function], function, address, flagList(flags), timeout), end='')
-                fmt = "{:01x}" if W_COILS == function else "{:02x}"
-                print(','.join((''.join(fmt.format(c) for c in d)) for d in datalist))
+        initlist.append({'device': device, 'mbid': devices[device], 'function': function,
+                         'address': address, 'data': datalist, 'timeout': timeout, 'flags': cflags })
+        if verbose:
+            print("Init {:2}: {} {}({}) addr=0x{:04x} flags={} timeout={} data="
+                  .format(len(initlist), device, FUNCNAMES[function], function, address, cflagList(cflags), timeout), end='')
+            fmt = "{:01x}" if W_COILS == function else "{:02x}"
+            print(','.join((''.join(fmt.format(c) for c in d)) for d in datalist))
 
-        # endif
     # end for cmd in init:
 
     return initlist
+
+#
+# Return the 'modbustype' attribute translated
+#
+def getModbusType(tag, ers):
+    if 'modbustype' not in tag.attrib:
+        return None
+    mbt = tag.attrib['modbustype'].upper()
+    if mbt not in MBTYPES:
+        perr("Invalid modbustype '{}' must be one of {} in {}"
+                .format(tag.attrib['modbustype'], str(list(MBTYPES.keys())), ers))
+        return None
+    return MBTYPES[mbt];
+
+#
+# Return the 'haltype' attribute translated
+#
+def getHalType(tag, ers):
+    if 'haltype' not in tag.attrib:
+        return None
+    ht = tag.attrib['haltype'].upper()
+    if ht not in HALTYPES:
+        perr("Invalid haltype '{}' must be one of {} in {}"
+                .format(tag.attrib['haltype'], str(list(HALTYPES.keys())), ers))
+        return None
+    return HALTYPES[ht];
 
 #
 # Parse the <commands> tag content
@@ -935,255 +1023,317 @@ def handleCommands(commands):
             perr("Expected <command> tag as child of <commands>")
             continue
 
-        checkAttribs(cmd.attrib, CMDSATTRIB, lcl)
-
         if 'delay' in cmd.attrib:
             # A delay between commands
+            checkAttribs(cmd.attrib, DELAYATTRIB, lcl)
             delay = checkInt(cmd.attrib, 'delay')
             if None == delay or delay < 0 or delay > MAXDELAY:
-                perr("Attribute 'delay' out of range [0..{}] {}".format(MAXDELAY, lil))
+                perr("Attribute 'delay' out of range [0..{}] {}".format(MAXDELAY, lcl))
                 continue
             cmdlist.append({'delay': delay})
             if verbose:
                 print("Command {:2}: delay {} microseconds".format(len(cmdlist), delay))
+            continue
+
+        # Handling a normal command
+        checkAttribs(cmd.attrib, CMDSATTRIB, lcl)
+
+        # Device must be known
+        device = getDevice(cmd.attrib, lcl)
+        if None == device:
+            continue
+
+        # Find timeout to use
+        timeout = getTimeout(cmd.attrib,lcl)
+        if None == timeout:
+            continue
+
+        if 'interval' in cmd.attrib:
+            if 'ONCE' == cmd.attrib['interval'].upper():
+                interval = 0xffffffff   # Marks infinity
+            else:
+                interval = checkInt(cmd.attrib, 'interval')
+                if None == interval or interval < 0 or interval > MAXINTERVAL:
+                    perr("Attribute 'interval' out of range [once,0..{}] {}".format(MAXINTERVAL, lcl))
+                    continue
         else:
-            # Device must be known
-            if 'device' not in cmd.attrib:
-                perr("Attribute 'device' missing in {}".format(lcl))
+            interval = configparams['interval'] # Global default
+
+        # Must have a target address
+        address = getAddress(cmd.attrib, lcl)
+        if None == address:
+            continue
+
+        # The command function to perform
+        if 'function' not in cmd.attrib:
+            perr("Attribute 'function' missing in {}".format(lcl))
+            continue
+        function = cmd.attrib['function'].upper()
+        # check depends on unicast or broadcast
+        if 'broadcast' == device and function not in WRITEFUNCTIONS:
+            perr("Function '{}' not available from {} for broadcast in {}".format(function, str(list(WRITEFUNCTIONS.keys())), lcl))
+            continue
+        elif function not in FUNCTIONS:
+            perr("Function '{}' not defined in {} in {}".format(function, str(list(FUNCTIONS.keys())), lcl))
+            continue
+        maxcount = FUNCTIONS[function][1]
+        function = FUNCTIONS[function][0]
+
+        # How many pins to read/write
+        if  function in [W_REGISTER, W_COIL]:
+            count = 1
+            if 'count' in cmd.attrib:
+                pwarn("Attribute 'count' ignored for {}({}) in {}".format(FUNCNAMES[function], function, lcl))
+        else:
+            count = checkInt(cmd.attrib, 'count')
+            if None == count:
+                count = 0
+
+        if function in BITFUNCTIONS:
+            # Coils and inputs are binary and always map to HAL_BIT
+            if 'modbustype' in cmd.attrib:
+                pwarn("Attribute 'modbustype' ignored for bit functions ({}) in {}".format(str(list(BITFUNCTIONS.keys())), lcl))
+            if 'haltype' in cmd.attrib:
+                pwarn("Attribute 'haltype' ignored for bit functions (always HAL_BIT) in {}".format(lcl))
+            defmtype = [-1, 2000, 1] # fake mtype
+            defhtype = HAL_BIT
+        else:
+            # These are defaults for R_REGISTERS, R_INPUTREGS, W_REGISTER and W_REGISTERS
+            defmtype = getModbusType(cmd, lcl)
+            defhtype = getHalType(cmd, lcl)
+            if None != defmtype and W_REGISTER == function:
+                if (defmtype[0] & MBT_X_MASK) not in [MBT_AB, MBT_BA]:
+                    perr("Function W_REGISTER(6) requires a 16-bit modbustype (S_AB,S_BA,U_AB,U_BA,F_AB,F_BA) in {}".format(lcl))
+                    continue
+                assert 1 == count # This should have been set above
+
+        # Get optional attrib flags
+        # scale is default for float pins
+        # clamp is default on all pins
+        defpflag  = MBCCB_PINF_SCALE if defhtype == HAL_FLT else 0
+        defpflag |= MBCCB_PINF_CLAMP if function in REGFUNCTIONS else 0
+        (cflags, pflags) = parseOptFlags(device, cmd.attrib, 0, defpflag)
+        if 0 != cflags & ~MBCCB_CMDF_MASK:
+            pwarn("Additional cmd flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_MASK, lcl))
+        if 0 != pflags & ~MBCCB_PINF_MASK:
+            pwarn("Additional pin flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(pflags, MBCCB_PINF_MASK, lcl))
+
+        if (pflags & MBCCB_PINF_SCALE) and defhtype in [HAL_U32, HAL_U64]:
+            pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lcl))
+            pflags &= ~MBCCB_PINF_SCALE & 0xffff
+
+        if None != defmtype and ((0 == (pflags & MBCCB_PINF_SCALE)) and
+                   ((MBT_S == (defmtype[0] & MBT_T_MASK) and defhtype in [HAL_U32, HAL_U64])
+                 or (MBT_U == (defmtype[0] & MBT_T_MASK) and defhtype in [HAL_S32, HAL_S64]))):
+            pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
+                    .format(HALNAMES[defhtype], MBNAMES[defmtype[0]], lcl))
+
+        if None != defmtype and (defmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and defhtype in [HAL_U32, HAL_S32]:
+            pwarn("Haltype destination '{}' is smaller than Modbus source type {} in {}"
+                    .format(HALNAMES[defhtype], MBNAMES[defmtype[0]], lcl))
+
+        if (cflags & MBCCB_CMDF_RESEND) and interval == 0xffffffff:
+            perr("Interval 'once' and 'resend' are mutually exclusive in {}".format(lcl))
+            continue
+
+        cmdname = cmd.attrib['name'] if 'name' in cmd.attrib else None
+        if None != cmdname:
+            if not pinpattern.match(cmdname):
+                perr("Attribute 'name' contains invalid characters {}".format(lcl))
                 continue
-            device = cmd.attrib['device']
-            if device not in devices:
-                perr("Device name '{}' not found in devices list {}".format(device, lcl))
-                continue
-
-            # Find timeout to use
-            if 'timeout' in cmd.attrib:
-                # A specific timeout for this command
-                timeout = checkInt(cmd.attrib, 'timeout')
-                if None == timeout or timeout < 0 or timeout > MAXDELAY:
-                    perr("Attribute 'timeout' out of range [0..{}] {}".format(MAXDELAY, lil))
-                    continue
-                if 'timeoutbits' in cmd.attrib:
-                    pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(lil))
-            elif 'timeoutbits' in cmd.attrib:
-                tob = checkInt(cmd.attrib, 'timeoutbits')
-                if None == tob or tob < 0 or tob > MAXDELAYBITS:
-                    perr("Attribute 'timeoutbits' out of range [0..{}] {}".format(MAXDELAYBITS, lil))
-                    continue
-                timeout = math.ceil(tob * 1000000.0 / configparams['baudrate'])
-            else:
-                timeout = configparams['timeout']   # Use global timeout
-
-            if 'interval' in cmd.attrib:
-                if 'ONCE' == cmd.attrib['interval'].upper():
-                    interval = 0xffffffff   # Marks infinity
-                else:
-                    interval = checkInt(cmd.attrib, 'interval')
-                    if None == interval or interval < 0 or interval > MAXINTERVAL:
-                        perr("Attribute 'interval' out of range [once,0..{}] {}".format(MAXINTERVAL, lil))
-                        continue
-            else:
-                interval = configparams['interval'] # Global default
-
-            # Must have a target address
-            address = checkInt(cmd.attrib, 'address')
-            if None == address:
-                perr("Attribute 'address' invalid or missing in {}".format(lcl))
-                continue
-            if address < 0 or address > 65535:
-                perr("Address '{}' out of range [0..65535] in {}".format(address, lcl))
-                continue
-
-            # The command function to perform
-            if 'function' not in cmd.attrib:
-                perr("Attribute 'function' missing in {}".format(lcl))
-                continue
-            function = cmd.attrib['function'].upper()
-            # check depends on unicast or broadcast
-            if 'broadcast' == device:
-                if function not in WRITEFUNCTIONS:
-                    perr("Function '{}' not available from {} for broadcast in {}".format(function, str(list(WRITEFUNCTIONS.keys())), lcl))
-                    continue
-            else:
-                if function not in FUNCTIONS:
-                    perr("Function '{}' not defined in {} in {}".format(function, str(list(FUNCTIONS.keys())), lcl))
-                    continue
-            function = FUNCTIONS[function][0]
-
-            # How many pins to read/write
-            if W_REGISTER == function and 'count' not in cmd.attrib:
-                count = 1
-            else:
-                count = checkInt(cmd.attrib, 'count')
-                if None == count:
-                    perr("Invalid or missing 'count' in {}".format(lcl))
-                    continue
-
-            if function in BITFUNCTIONS:
-                # Coils and inputs are binary and always map to HAL_BIT
-                if 'modbustype' in cmd.attrib:
-                    pwarn("Attribute 'modbustype' ignored for bit functions ({}) in {}".format(str(list(BITFUNCTIONS.keys())), lcl))
-                if 'haltype' in cmd.attrib and cmd.attrib['haltype'].upper() != 'HAL_BIT':
-                    pwarn("Attribute 'haltype' ignore for bit functions (always HAL_BIT) in {}".format(lcl))
-                nwords   = 1
-                maxcount = 2000
-                mtype    = 0
-                haltype  = HAL_BIT
-            else:
-                # Others must specify a type
-                if 'haltype' not in cmd.attrib:
-                    perr("Attribute 'haltype' missing in {}".format(lcl))
-                    continue
-                haltype = cmd.attrib['haltype'].upper()
-                if haltype not in HALTYPES:
-                    perr("Invalid haltype '{}' must be one of {} in {}".format(haltype, str(list(HALTYPES.keys())), lcl))
-                    continue
-                if 'modbustype' not in cmd.attrib:
-                    pwarn("Attribute 'modbustype' missing in {}. Defaulting to U_AB.".format(lcl))
-                    mtype = 'U_AB';
-                else:
-                    mtype = cmd.attrib['modbustype'].upper()
-                if mtype not in MBTYPES:
-                    perr("Invalid modbustype '{}' must be one of {} in {}".format(mtype, str(list(MBTYPES.keys())), lcl))
-                    continue
-                nwords   = MBTYPES[mtype][2]
-                maxcount = MBTYPES[mtype][1]
-                mtype    = MBTYPES[mtype][0]
-                haltype  = HALTYPES[haltype]
-                if W_REGISTER == function:
-                    if (mtype & MBT_X_MASK) not in [MBT_AB, MBT_BA]:
-                        perr("Function W_REGISTER(6) requires a 16-bit modbustype (S_AB,S_BA,U_AB,U_BA,F_AB,F_BA) in {}".format(lcl))
-                        continue
-                    if 1 != count:
-                        perr("Function W_REGISTER(6) must have a count of one (1) in {}".format(lcl))
-                        continue
-
-            # Get optional attrib flags
-            # scale is default for float pins
-            # clamp is default on all pins
-            sflag  = MBCCB_CMDF_SCALE if haltype == HAL_FLT else 0
-            sflag |= MBCCB_CMDF_CLAMP if function not in BITFUNCTIONS else 0
-            flags = parseOptFlags(device, cmd.attrib, sflag)
-            if 0 != flags & ~MBCCB_CMDF_MASK:
-                pwarn("Additional flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(flags, MBCCB_CMDF_MASK, lcl))
-
-            if (flags & MBCCB_CMDF_SCALE) and haltype in [HAL_U32, HAL_U64]:
-                pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lcl))
-                flags &= ~MBCCB_CMDF_SCALE & 0xffff
-
-            if ((0 == (flags & MBCCB_CMDF_SCALE)) and
-                       ((MBT_S == (mtype & MBT_T_MASK) and haltype in [HAL_U32, HAL_U64])
-                     or (MBT_U == (mtype & MBT_T_MASK) and haltype in [HAL_S32, HAL_S64]))):
-                pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
-                        .format(HALNAMES[haltype], MBNAMES[mtype], lcl))
-
-            if (flags & MBCCB_CMDF_RESEND) and interval == 0xffffffff:
-                perr("Interval 'once' and 'resend' are mutually exclusive in {}".format(lcl))
+            if len(cmdname) > MAXPINNAME - 3:
+                perr("Attribute 'name' longer than {} characters in {}".format(MAXPINNAME - 3, lcl))
                 continue
 
-            # Don't wrap address
-            if maxcount * nwords + address > 65536:
-                maxcount = (65536 - address) // nwords
+        # Iterate all pin tags
+        # pinlist contains set of [pintag, mtype, htype, flags, regoffset]
+        pinlist = []
+        err = False
+        regofs = 0
+        for pin in cmd:
+            lpl = "{}/pin[{}]".format(lcl, (1 + len(pinlist)))
+            if pin.tag == 'description':
+                continue
+            if pin.tag != 'pin':
+                perr("Expected <pin> tag {}".format(lcl))
+                err = True
+                break
 
-            pinlist = []
-            err = False
-            for pin in cmd:
-                lpl = "{}/pin[{}]".format(lcl, (1 + len(pinlist)))
-                if pin.tag == 'description':
-                    continue
-                if pin.tag != 'pin':
-                    perr("Expected <pin> tag {}".format(lcl))
+            # We may skip registers in register reads
+            if 'skip' in pin.attrib:
+                if function not in [R_REGISTERS, R_INPUTREGS, W_REGISTERS]:
+                    perr("Attribute 'skip' Not allowed with function {}({}) in {}"
+                            .format(FUNCNAMES[function], function, lpl))
                     err = True
                     break
+                checkAttribs(pin.attrib, SKIPATTRIB, lpl)
+                skip = checkInt(pin.attrib, 'skip')
+                if None == skip or skip < 1 or skip > 24:
+                    perr("Attribute 'skip' in invalid or out of range [1,24] in {}".format(lpl))
+                    err = True
+                    break
+                elif skip > 11:
+                    pwarn("Attribute 'skip' larger than 11 registers. May be better to split command in {}".format(lpl))
+                regofs += skip
+                continue
 
-                checkAttribs(pin.attrib, PINSATTRIB, lpl)
+            # Normal pin attribs
+            checkAttribs(pin.attrib, PINSATTRIB, lpl)
 
-                if 'name' not in pin.attrib:
+            # Setup pin name
+            if 'name' not in pin.attrib:
+                if None == cmdname:
                     perr("Attribute 'name' missing in {}".format(lpl))
                     err = True
                     break
+                pinname = "{}-{:02d}".format(cmdname, len(pinlist))
+            else:
                 pinname = pin.attrib['name']
                 if not pinpattern.match(pinname):
                     perr("Attribute 'name' contains invalid characters in {}".format(lpl))
                     err = True
                     break
-                if len(pinname) > MAXPINNAME:
-                    perr("Attribute 'name' longer than {} characters in {}".format(MAXPINNAME, lpl))
-                    err = True
-                    break
-                pintag = "{}.{}".format(device, pinname)
-                if pintag in pinlistall:
-                    perr("Pin name '{}' already in use in {}".format(pintag, lpl))
-                    err = True
-                    break
-                pinlist.append(pintag)
+            if len(pinname) > MAXPINNAME:
+                perr("Pin name '{}' longer than {} characters in {}".format(pinname, MAXPINNAME, lpl))
+                err = True
+                break
+            pintag = "{}.{}".format(device, pinname)
+            if pintag in pinlistall:
+                perr("Pin name '{}' already in use in {}".format(pintag, lpl))
+                err = True
+                break
+
+            if function in BITFUNCTIONS:
+                pinlist.append({'pin': pintag, 'mtype': 0, 'htype': HAL_BIT, 'flags': 0, 'regofs': regofs})
                 pinlistall.append(pintag)
-
-            if err:
+                regofs += 1
                 continue
 
-            if len(pinlist) <= 0:
-                # If no <pin> list, then we require a count
-                if None == count:
-                    perr("Attribute 'count' invalid or missing in {}".format(lcl))
-                    continue
+            # Register functions can have override attributes
+            pmtype = getModbusType(pin, lpl)
+            phtype = getHalType(pin, lpl)
+            if None == pmtype and None == defmtype:
+                perr("No 'modubustype' attribute defined in command or pin tag in {}".format(lpl))
+                err = True
+                break
+            if None == phtype and None == defhtype:
+                perr("No 'haltype' attribute defined in command or pin tag in {}".format(lpl))
+                err = True
+                break
+            if None == pmtype:
+                pmtype = defmtype
+            if None == phtype:
+                phtype = defhtype
+            assert pmtype != None   # Must have hal and modbus types
+            assert phtype != None
+            # W_REGISTER(S), R_REGISTERS and R_INPUTREGS can have special
+            # scale and clamp flags
+            (cf, pf) = parseOptFlags(device, pin.attrib, 0, pflags)
+            if (pf & MBCCB_PINF_SCALE) and phtype in [HAL_U32, HAL_U64]:
+                pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lpl))
+                pf &= ~MBCCB_PINF_SCALE
+            msz = MBTBYTESIZES[pmtype[0] & MBT_X_MASK]
+            hsz = 4 if phtype in [HAL_U32, HAL_S32] else 8
+            if ((0 == (pf & MBCCB_PINF_SCALE)) and msz >= hsz and
+                       ((MBT_S == (pmtype[0] & MBT_T_MASK) and phtype in [HAL_U32, HAL_U64])
+                     or (MBT_U == (pmtype[0] & MBT_T_MASK) and phtype in [HAL_S32, HAL_S64]))):
+                pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
+                        .format(HALNAMES[phtype], MBNAMES[pmtype[0]], lpl))
+            if (pmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and phtype in [HAL_U32, HAL_S32]:
+                pwarn("Haltype destination '{}' is smaller than Modbus source type {} in {}"
+                        .format(HALNAMES[phtype], MBNAMES[pmtype[0]], lpl))
+
+            if (((pmtype[0] & MBT_X_MASK) >= MBT_ABCD and 0 != (regofs & 1))
+                or ((pmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and 0 != (regofs & 3))):
+                pwarn("Multi-register type '{}' not aligned to natural boundary in {}".format(MBNAMES[pmtype[0]], lpl))
+
+            pinlist.append({'pin': pintag, 'mtype': pmtype[0], 'htype': phtype, 'flags': pf, 'regofs': regofs})
+            regofs += MBTBYTESIZES[pmtype[0] & MBT_X_MASK] // 2
+        # endfor pin in cmd
+        if err:
+            continue
+
+        if len(pinlist) <= 0:
+            # If no <pin> list, then we require a count
+            if 0 == count:
+                perr("Attribute 'count' invalid or missing in {}".format(lcl))
+                continue
+        else:
+            # We have a <pin> list; it may need to be appended
+            if 0 == count:
+                count = len(pinlist)    # pin list determines count
+            elif len(pinlist) > count:
+                perr("Number of pins '{}' larger than count '{}' in {}".format(len(pinlist), count, lcl))
+                continue
+
+        # Append default naming scheme "name-XX"
+        # But we must have default name and types defined to do so
+        if len(pinlist) < count:
+            if None == defmtype:
+                perr("Attribute 'modbustype' missing in {}".format(lcl))
+                continue
+            if None == defhtype:
+                perr("Attribute 'haltype' missing in {}".format(lcl))
+                continue
+            if None == cmdname:
+                perr("Attribute 'name' missing in {}".format(lcl))
+                continue
+
+        # Fill pin list with generated names
+        while len(pinlist) < count:
+            pintag = "{}.{}-{:02d}".format(device, cmdname, len(pinlist))
+            if pintag in pinlistall:
+                perr("Pin name '{}' already in use in {}".format(pintag, lcl))
+                err = True
+                break
+            if function in BITFUNCTIONS:
+                pinlist.append({'pin': pintag, 'mtype': 0, 'htype': HAL_BIT, 'flags': 0, 'regofs': regofs})
+                regofs += 1
             else:
-                # We have a <pin> list; it may need to be appended
-                if None == count:
-                    count = len(pinlist)    # pin list determines count
-                elif len(pinlist) > count:
-                    perr("Number of pins '{}' larger than count '{}' in {}".format(len(pinlist), count, lcl))
-                    continue
+                pinlist.append({'pin': pintag, 'mtype': defmtype[0], 'htype': defhtype, 'flags': pflags, 'regofs': regofs})
+                regofs += MBTBYTESIZES[defmtype[0] & MBT_X_MASK] // 2
+            pinlistall.append(pintag)
+        if err:
+            continue
 
-            if count < 1 or count > maxcount:
-                perr("Number of pins '{}' out of range [1..{}] in {}".format(count, maxcount, lcl))
-                continue
+        # pinlist has all pins
+        # regofs has the total number of registers to read/write
 
-            # Append default naming scheme "name-XX"
-            if len(pinlist) < count:
-                if 'name' not in cmd.attrib:
-                    perr("Attribute 'name' invalid or missing in {}".format(lcl))
-                    continue
-                pinbase = cmd.attrib['name']
-                if not pinpattern.match(pinbase):
-                    perr("Attribute 'name' contains invalid characters {}".format(lcl))
-                    continue
-                if len(pinbase) > MAXPINNAME - 3:
-                    perr("Attribute 'name' longer than {} characters in {}".format(MAXPINNAME - 3, lcl))
-                    continue
-                # Fill pin list with generated names
-                err = False
-                for i in range(len(pinlist), count):
-                    pintag = "{}.{}-{:02d}".format(device, pinbase, i)
-                    if pintag in pinlistall:
-                        perr("Pin name '{}' already in use in {}".format(pintag, lcl))
-                        err = True
-                        break
-                    pinlist.append(pintag)
-                    pinlistall.append(pintag)
-                if err:
-                    continue
+        # Must be in bounds [1..maxcount]
+        if count < 1 or count > maxcount or regofs > maxcount:
+            perr("Number of pins or registers '{}' out of range [1..{}] in {}".format(count, maxcount, lcl))
+            continue
 
-            if 0 == timeout:
-                timeout = calcTimeout(function, count, mtype);
+        # Don't wrap address
+        if regofs + address > 65536:
+            perr("Reading {} registers from address {} wraps the address counter in {}".format(regofs, address, lcl))
+            continue
 
-            cmdlist.append({'device': device, 'mbid': devices[device], 'function': function, 'timeout': timeout,
-                            'address': address, 'mtype': mtype, 'htype': haltype, 'count': count, 'pins': pinlist,
-                            'flags': flags, 'interval': interval })
-            if verbose:
-                mbn = 'BIT' if haltype == HAL_BIT else MBNAMES[mtype]
-                print("Command {:2}: {} {}({}) addr=0x{:04x} flags={} {}<=>{} interval={} timeout={}"
-                    .format(len(cmdlist), device, FUNCNAMES[function], function, address, flagList(flags),
-                            HALNAMES[haltype], mbn, interval, timeout))
-                io = "in " if FUNCNAMES[function] in WRITEFUNCTIONS else "out"
-                for p in range(len(pinlist)):
-                    print("  pin {:2} ({}): {}".format(p+1, io, pinlist[p]))
-                    if flags & MBCCB_CMDF_SCALE:
-                        print("              : {}.offset".format(pinlist[p]))
-                        print("              : {}.scale".format(pinlist[p]))
-                        if FUNCNAMES[function] not in WRITEFUNCTIONS:
-                            print("              : {}.scaled".format(pinlist[p]))
-        # endif
+        if 0 == timeout:
+            timeout = calcTimeout(function, regofs, MBT_AB);
+
+        cmdlist.append({'device': device, 'mbid': devices[device], 'function': function,
+                        'timeout': timeout, 'address': address, 'count': count,
+                        'regcnt': regofs, 'pins': pinlist, 'flags': cflags,
+                        'interval': interval })
+        if verbose:
+            print("Command {:2}: {} {}({}) addr=0x{:04x} flags={} interval={} timeout={}"
+                .format(len(cmdlist), device, FUNCNAMES[function], function, address, cflagList(cflags),
+                        interval, timeout))
+            io = "in " if FUNCNAMES[function] in WRITEFUNCTIONS else "out"
+            for p in range(len(pinlist)):
+                pin = pinlist[p]
+                if HAL_BIT == pin['htype']:
+                    mbn = 'HAL_BIT<=>BIT'
+                else:
+                    mbn = '{}<=>{}'.format(HALNAMES[pin['htype']], MBNAMES[pin['mtype']])
+                print("  pin {:2} ({}): {:20} {} flags={} addr=0x{:04x}".format(p+1, io, pin['pin'],
+                        mbn, pflagList(pin['flags']), address + pin['regofs']))
+                if pin['flags'] & MBCCB_PINF_SCALE:
+                    print("              : {}.offset".format(pin['pin']))
+                    print("              : {}.scale".format(pin['pin']))
+                    if FUNCNAMES[function] not in WRITEFUNCTIONS:
+                        print("              : {}.scaled".format(pin['pin']))
     # end for cmd in commands:
 
     return cmdlist
@@ -1310,11 +1460,11 @@ def main():
     #   rtapi_u8  func;    // Function code, 0 for delay
     #   rtapi_u16 addr;    // Address, 0 in init
     #   rtapi_u16 pincnt;  // Number of pins, 0 in init
-    #   rtapi_u8  htype;   // HAL data type, 0 for init
-    #   rtapi_u8  mtype;   // Modbus data type, 0 for init
     #   rtapi_u16 flags;   // Mostly quirks to handle, see MBCCB_CMDF_* defines
+    #   rtapi_u16 regcnt;  // Number of registers, 0 for init
     #   rtapi_u16 unused1;
-    #   rtapi_u32 unused2[2];
+    #   rtapi_u32 unused2;
+    #   rtapi_u32 typeptr; // Type and address offset list, 0 for init
     #   rtapi_u32 interval;// The interval to repeat this command, 0 for init
     #   rtapi_u32 timeout; // Response timeout or delay in microseconds
     #   rtapi_u32 dataptr; // Pin names, packet data for init
@@ -1322,12 +1472,12 @@ def main():
     #
     for i in initlist:
         if 'delay' in i:
-            ilb.append(struct.pack(">BBHHBBHHIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, i['delay'], 0))
+            ilb.append(struct.pack(">BBHHHHHIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, i['delay'], 0))
         else:
             mbid = i['mbid']
             func = i['function']
             addr = i['address']
-            ilb.append(struct.pack(">BBHHBBHHIIIII", mbid, func, addr, 0, 0, 0, i['flags'], 0, 0, 0, 0, i['timeout'], dlblen))
+            ilb.append(struct.pack(">BBHHHHHIIIII", mbid, func, addr, 0, i['flags'], 0, 0, 0, 0, 0, i['timeout'], dlblen))
             # Precompile the data packet so we only need to copy it
             if func in [W_COIL, W_REGISTER]:  # Write single coil or single register
                 # mbid, func, length address and value == 6 bytes
@@ -1371,11 +1521,11 @@ def main():
     #   rtapi_u8  func;    // Function code
     #   rtapi_u16 addr;    // Address
     #   rtapi_u16 pincnt;  // Number of pins
-    #   rtapi_u8  htype;   // HAL data type, 0 for init
-    #   rtapi_u8  mtype;   // Modbus data type, 0 for init
     #   rtapi_u16 flags;   // Mostly quirks to handle, see MBCCB_CMDF_* defines
+    #   rtapi_u16 regcnt;  // Number of registers, 0 for init
     #   rtapi_u16 unused1;
-    #   rtapi_u32 unused2[2];
+    #   rtapi_u32 unused2;
+    #   rtapi_u32 typeptr; // Type and address offset list, 0 for init
     #   rtapi_u32 interval;// The interval to repeat this command, 0 for init
     #   rtapi_u32 timeout; // Response timeout or delay in microseconds
     #   rtapi_u32 dataptr; // Pin names, packet data for init
@@ -1383,18 +1533,44 @@ def main():
     #
     for i in commands:
         if 'delay' in i:
-            cmb.append(struct.pack(">BBHHBBHHIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, i['delay'], 0))
+            cmb.append(struct.pack(">BBHHHHHIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, i['delay'], 0))
         else:
-            cmb.append(struct.pack(">BBHHBBHHIIIII", i['mbid'], i['function'], i['address'], i['count'],
-                                                     i['htype'], i['mtype'], i['flags'], 0, 0, 0,
-                                                     i['interval'], i['timeout'], dlblen))
+            pinptr = dlblen
+            typs = b''
             # Add pin names to data list
             for p in i['pins']:
-                asc = p.encode('ascii')
+                asc = p['pin'].encode('ascii')
                 d = struct.pack(">B", len(asc)+1) + asc + struct.pack(">B", 0)
                 dlblen += 1 + len(asc) + 1
                 dlb.append(d)
+
+                if i['function'] in REGFUNCTIONS:
+                    # Add mtype, htype, flags, regoffset
+                    typs += struct.pack(">BBBB", p['mtype'], p['htype'], p['flags'], p['regofs'])
             npins += len(i['pins'])
+
+            if len(typs) > 0:
+                # Align on % 4
+                # Note that the /content/ must be aligned
+                algn = (dlblen + 1) % 4
+                if 3 == algn:
+                    dlb.append(struct.pack(">B", 0))
+                    dlblen += 1
+                elif 2 == algn:
+                    dlb.append(struct.pack(">BB", 1, 0))
+                    dlblen += 2
+                elif 1 == algn:
+                    dlb.append(struct.pack(">BBB", 2, 0, 0))
+                    dlblen += 3
+                typeptr = dlblen
+                dlblen += 1 + len(typs)
+                dlb.append(struct.pack(">B", len(typs)) + typs)
+            else:
+                typeptr = 0
+
+            cmb.append(struct.pack(">BBHHHHHIIIII", i['mbid'], i['function'], i['address'], i['count'],
+                                                     i['flags'], i['regcnt'], 0, 0,
+                                                     typeptr, i['interval'], i['timeout'], pinptr))
 
     # typedef struct {
     #   rtapi_u8  sig[8];   // Signature and version {'M','e','s','a','M','B','0','1'}

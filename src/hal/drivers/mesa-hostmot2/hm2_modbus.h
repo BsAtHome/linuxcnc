@@ -48,24 +48,35 @@ typedef struct {
 	rtapi_u8	func;	// Function code, 0 for delay command
 	rtapi_u16	addr;	// Address, 0 for init
 	rtapi_u16	pincnt;	// Number of pins, 0 for init
-	rtapi_u8	htype;	// HAL data type, 0 for init
-	rtapi_u8	mtype;	// Modbus data type, 0 for init
 	rtapi_u16	flags;	// Mostly quirks to handle, see MBCCB_CMDF_* defines
+	rtapi_u16	regcnt;	// Number of registers, 0 for init
 	rtapi_u16	unused1;
-	rtapi_u32	unused2[2];
+	rtapi_u32	unused2;
+	rtapi_u32	typeptr; // Type and address offset list, 0 for init
 	rtapi_u32	interval;// The interval to repeat this command, 0 for init
 	rtapi_u32	timeout; // Response timeout or delay in microseconds
 	rtapi_u32	dataptr; // Pin names, packet data for init
 } hm2_modbus_mbccb_cmds_t;
 
+#define MBCCB_PINF_SCALE	0x0001	// Add scale/offset pins
+#define MBCCB_PINF_CLAMP	0x0002	// Clamp values to fit target
+#define MBCCB_PINF_MASK		0x0003	// sum of pin flags
+
 #define MBCCB_CMDF_TIMESOUT	0x0001	// Don't treat timeout as an error
 #define MBCCB_CMDF_BCANSWER	0x0002	// Broadcasts will get an answer, ignore it
 #define MBCCB_CMDF_NOANSWER	0x0004	// Don't expect an answer
-#define MBCCB_CMDF_SCALE	0x0008	// Add scale/offset pins
-#define MBCCB_CMDF_CLAMP	0x0010	// Clamp values to fit target
-#define MBCCB_CMDF_RESEND	0x0020	// Resend the write even if no pins are changed
+#define MBCCB_CMDF_RESEND	0x0008	// Resend the write even if no pins are changed
 #define MBCCB_CMDF_INITMASK	0x0007	// sum of allowed flags in init
-#define MBCCB_CMDF_MASK		0x003f	// sum of all above flags
+#define MBCCB_CMDF_MASK		0x000f	// sum of all above flags
+
+// Type mapping for pins/PDU register data
+// Only for R_INPUTREGS, R_REGISTERS and W_REGISTERS
+typedef struct {
+	rtapi_u8	mtype;	// Modbus type
+	rtapi_u8	htype;	// HAL type
+	rtapi_u8	flags;	// scale and clamp flags
+	rtapi_u8	regofs;	// PDU register offset for value
+} hm2_modbus_mbccb_type_t;
 
 #endif
 // vim: ts=4
