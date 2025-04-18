@@ -378,6 +378,7 @@ static PyObject *pyhal_read_common(halitem *item) {
             case HAL_PORT: // HAL_PORT is currently not supported
             case HAL_TYPE_UNSPECIFIED: /* fallthrough */ ;
             case HAL_TYPE_UNINITIALIZED: /* fallthrough */ ;
+            case HAL_TYPE_MAX: /* fallthrough */ ;
         }
     } else {
         switch(item->type) {
@@ -390,6 +391,7 @@ static PyObject *pyhal_read_common(halitem *item) {
             case HAL_PORT: // HAL_PORT is currently not supported
             case HAL_TYPE_UNSPECIFIED: /* fallthrough */ ;
             case HAL_TYPE_UNINITIALIZED: /* fallthrough */ ;
+            case HAL_TYPE_MAX: /* fallthrough */ ;
         }
     }
     PyErr_Format(pyhal_error_type, "Invalid item type %d", item->type);
@@ -1220,6 +1222,7 @@ PyObject *get_value(PyObject * /*self*/, PyObject *args) {
             case HAL_PORT: // HAL_PORT is currently not supported
             case HAL_TYPE_UNSPECIFIED: /* fallthrough */ ;
             case HAL_TYPE_UNINITIALIZED: /* fallthrough */ ;
+            case HAL_TYPE_MAX: /* fallthrough */ ;
         }
     }
     /* not found, search pin list for name */
@@ -1246,6 +1249,7 @@ PyObject *get_value(PyObject * /*self*/, PyObject *args) {
             case HAL_PORT: // HAL_PORT is currently not supported
             case HAL_TYPE_UNSPECIFIED: /* fallthrough */ ;
             case HAL_TYPE_UNINITIALIZED: /* fallthrough */ ;
+            case HAL_TYPE_MAX: /* fallthrough */ ;
         }
     }
     sig = halpr_find_sig_by_name(name);
@@ -1265,6 +1269,7 @@ PyObject *get_value(PyObject * /*self*/, PyObject *args) {
             case HAL_PORT: // HAL_PORT is currently not supported
             case HAL_TYPE_UNSPECIFIED: /* fallthrough */ ;
             case HAL_TYPE_UNINITIALIZED: /* fallthrough */ ;
+            case HAL_TYPE_MAX: /* fallthrough */ ;
         }
     }
     /* error if here */
