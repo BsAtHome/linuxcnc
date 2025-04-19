@@ -22,24 +22,23 @@
 # XML format
 # <mesamodbus [comm param override attributes]>
 #   <devices>
-#     <device address="0x01" name="mydev"><description /></device>
+#     <device address="0x01" name="mydev"><description>My device</description></device>
 #     ...
 #   </devices>
 #   <initlist>
-#     <command device="mydev" function="6" address="0x0034" /><data val="0x0001" /><data... /><description /></command>
+#     <command device="mydev" function="6" address="0x0034" /><data val="0x0001" /><data... /></command>
 #     <command delay="2000" />
 #     ...
 #   </initlist>
 #   <commands>
-#     <!-- <command> can have a local 'timeout' override attribute -->
-#     <command device="mydev" function="MBCMD_R_COILS" address="0x0000" count="8" name="state"><description /></command>
-#     <command device="mydev" function="MBCMD_W_COILS" address="0x0000" count="8" name="relay">
-#       <pin name="bulb-light"><description /></pin>
+#     <command device="mydev" function="R_INPUTS" address="0x0000" count="8" name="state"></command>
+#     <command device="mydev" function="W_COILS" address="0x0000" count="8" name="relay">
+#       <pin name="bulb-light"><description>Let there be light!</description></pin>
 #       <pin name="shinyshiny" />
 #       <pin name="vroooom" />
 #       ...
 #     </command>
-#     <command delay="2000" />
+#     <command delay="2000"><description>Use delay with care.</description></command>
 #      ...
 #   </commands>
 # </mesamodbus>
@@ -47,42 +46,7 @@
 # The <description> tag is just for comments. And, a future graphical interface
 # may use it to make stuff more explanatory.
 #
-# Mandatory <command> attributes:
-# - device="mydev"    A reference to the devices list
-# - function="6"      The Modbus function to perform
-# - address="0x1234"  The Modbus address
-#
-# Optional <command> attributes:
-# - bcanswer="1"  Broadcasts may set the attribute to signal a reply being sent
-#                 from the slave, even though it should keep quiet.
-# - noanswer="1"  Non-broadcasts may set the  attribute to indicate that no
-#                 answer is expected to be received.
-# - timesout="1"  Command reply timeout is not supposed to be treated as an
-#                 error. This can happen for devices that may or may not answer.
-# - scale="1"     Add scale/offset HAL pins. This is the default for pin type
-#                 'haltype="HAL_FLOAT"' (disable using 'scaled="0"'). Only
-#                 valid on hal types HAL_S32, HAL_S64 and HAL_FLOAT.
-# - clamp="1"     Clamp values to their native size. Default on, disable using
-#                 'clamp="0"'.
-# - resend="1"    Force writes to be resend every loop, even if no data has
-#                 changed. This helps devices that expect regular writes for,
-#                 for example, a watchdog.
-#
-# 'modbustype=...' attribute in <command> and <data> tags for non-bit functions:
-# - {S,U,F}_<order> where order is one of:
-#   * AB, BA
-#   * ABCD, BADC, CDAB, DCBA
-#   * ABCDEFGH, BADCFEHG, CDABGHEF, DCBAHGFE, EFGHABCD, FEHGBADC, GHEFCDAB, HGFEDCBA
-# The default modbustype is U_AB.
-#
-# 'haltype=... attribute in <command> tag for non-bit functions:
-# - HAL_FLOAT (HAL_FLT)
-# - HAL_S32
-# - HAL_U32
-# - HAL_S64
-# - HAL_U64
-# The name HAL_BIT is recognized but only allowed in bit functions (where it is
-# implicit anyway).
+# See man mesambccc(1) for format details.
 #
 
 import sys
@@ -184,6 +148,12 @@ MBT_F        = 0x20
 
 MBT_X_MASK   = 0x0f
 MBT_T_MASK   = 0xf0
+
+def mbtOrder(mtype):
+    return mtype & MBT_X_MASK
+
+def mbtType(mtype):
+    return mtype & MBT_T_MASK
 
 U_AB   = MBT_U | MBT_AB
 U_BA   = MBT_U | MBT_BA
@@ -396,7 +366,7 @@ def checkFlt(s, k):
 # Mangle 16 bit bytesex
 #
 def mangle16(d, mtype):
-    mtype &= MBT_X_MASK
+    mtype = mbtOrder(mtype)
     if MBT_AB == mtype:
         return d;
     if MBT_BA == mtype:
@@ -407,7 +377,7 @@ def mangle16(d, mtype):
 # Mangle 32 bit bytesex
 #
 def mangle32(d, mtype):
-    mtype &= MBT_X_MASK
+    mtype = mbtOrder(mtype)
     if MBT_ABCD == mtype:
         return d         # Source was in big endian
     if MBT_DCBA == mtype:
@@ -424,7 +394,7 @@ def mangle32(d, mtype):
 # Mangle 64 bit bytesex
 #
 def mangle64(d, mtype):
-    mtype &= MBT_X_MASK
+    mtype = mbtOrder(mtype)
     if MBT_ABCDEFGH == mtype:
         return d         # Source was in big endian
     if MBT_HGFEDCBA == mtype:
@@ -641,11 +611,11 @@ def calcTimeout(function, count, mtype):
     elif function in [W_COILS]:
         n = 9 + ((count + 7) // 8) + 8
     elif function in [R_REGISTERS, R_INPUTREGS]:
-        n = 8 + 3 + count * MBTBYTESIZES[mtype & MBT_X_MASK]
+        n = 8 + 3 + count * MBTBYTESIZES[mbtOrder(mtype)]
     elif function in [W_REGISTER, W_COIL]:
         n = 8 + 8
     elif function in [W_REGISTERS]:
-        n = 9 + count * MBTBYTESIZES[mtype & MBT_X_MASK] + 8
+        n = 9 + count * MBTBYTESIZES[mbtOrder(mtype)] + 8
     else:
         sys.exit("Unknown function '{}' in calcTimeout, aborting...".format(function))
     bits = 1 + 8 + 1
@@ -804,7 +774,7 @@ def handleInits(inits):
                 break
             mtype = MBTYPES[mtype][0]
 
-            if MBT_F == (mtype & MBT_T_MASK):
+            if MBT_F == mbtType(mtype):
                 # Handle floating point target
                 if function not in [W_REGISTER, W_REGISTERS]:
                     perr("Floating point data only possible for W_REGISTER(6)/W_REGISTERS(16) functions in {}".format(ldl))
@@ -921,7 +891,7 @@ def handleInits(inits):
                             break;
                         datalist.append(mangle32(struct.pack(">i", value), mtype))
                         dlnbytes += 4
-                    elif MBT_S == mtype & MBT_T_MASK:
+                    elif MBT_S == mbtType(mtype):
                         # 64-bit signed
                         if value < 0x8000000000000000 or value > 0x7fffffffffffffff:
                             perr("Value '{}' outside valid 64-bit range [{},{}] for W_REGISTERS(16) in {}"
@@ -930,7 +900,7 @@ def handleInits(inits):
                             break;
                         datalist.append(mangle64(struct.pack(">q", value), mtype))
                         dlnbytes += 8
-                    else: # MBT_U == mtype & MBT_T_MASK
+                    else: # MBT_U == mbtType(mtype)
                         # 64-bit unsigned
                         if value > 0xffffffffffffffff:
                             perr("Value '{}' outside valid 64-bit range [0,{}] for W_REGISTERS(16) in {}"
@@ -1102,7 +1072,7 @@ def handleCommands(commands):
             defmtype = getModbusType(cmd, lcl)
             defhtype = getHalType(cmd, lcl)
             if None != defmtype and W_REGISTER == function:
-                if (defmtype[0] & MBT_X_MASK) not in [MBT_AB, MBT_BA]:
+                if mbtOrder(defmtype[0]) not in [MBT_AB, MBT_BA]:
                     perr("Function W_REGISTER(6) requires a 16-bit modbustype (S_AB,S_BA,U_AB,U_BA,F_AB,F_BA) in {}".format(lcl))
                     continue
                 assert 1 == count # This should have been set above
@@ -1123,12 +1093,12 @@ def handleCommands(commands):
             pflags &= ~MBCCB_PINF_SCALE & 0xffff
 
         if None != defmtype and ((0 == (pflags & MBCCB_PINF_SCALE)) and
-                   ((MBT_S == (defmtype[0] & MBT_T_MASK) and defhtype in [HAL_U32, HAL_U64])
-                 or (MBT_U == (defmtype[0] & MBT_T_MASK) and defhtype in [HAL_S32, HAL_S64]))):
+                   ((MBT_S == mbtType(defmtype[0]) and defhtype in [HAL_U32, HAL_U64])
+                 or (MBT_U == mbtType(defmtype[0]) and defhtype in [HAL_S32, HAL_S64]))):
             pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
                     .format(HALNAMES[defhtype], MBNAMES[defmtype[0]], lcl))
 
-        if None != defmtype and (defmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and defhtype in [HAL_U32, HAL_S32]:
+        if None != defmtype and mbtOrder(defmtype[0]) >= MBT_ABCDEFGH and defhtype in [HAL_U32, HAL_S32]:
             pwarn("Haltype destination '{}' is smaller than Modbus source type {} in {}"
                     .format(HALNAMES[defhtype], MBNAMES[defmtype[0]], lcl))
 
@@ -1227,28 +1197,32 @@ def handleCommands(commands):
             assert pmtype != None   # Must have hal and modbus types
             assert phtype != None
             # W_REGISTER(S), R_REGISTERS and R_INPUTREGS can have special
+            if HAL_BIT == phtype and MBT_U != mbtType(pmtype):
+                perr("Haltype HAL_BIT with register function must use unsigned modbustype in {}".format(lpl))
+                err = True
+                break
             # scale and clamp flags
             (cf, pf) = parseOptFlags(device, pin.attrib, 0, pflags)
             if (pf & MBCCB_PINF_SCALE) and phtype in [HAL_U32, HAL_U64]:
                 pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lpl))
                 pf &= ~MBCCB_PINF_SCALE
-            msz = MBTBYTESIZES[pmtype[0] & MBT_X_MASK]
+            msz = MBTBYTESIZES[mbtOrder(pmtype[0])]
             hsz = 4 if phtype in [HAL_U32, HAL_S32] else 8
             if ((0 == (pf & MBCCB_PINF_SCALE)) and msz >= hsz and
-                       ((MBT_S == (pmtype[0] & MBT_T_MASK) and phtype in [HAL_U32, HAL_U64])
-                     or (MBT_U == (pmtype[0] & MBT_T_MASK) and phtype in [HAL_S32, HAL_S64]))):
+                       ((MBT_S == mbtType(pmtype[0]) and phtype in [HAL_U32, HAL_U64])
+                     or (MBT_U == mbtType(pmtype[0]) and phtype in [HAL_S32, HAL_S64]))):
                 pwarn("Signedness mismatch between haltype={} and modbustype={} may give wrong results in {}"
                         .format(HALNAMES[phtype], MBNAMES[pmtype[0]], lpl))
-            if (pmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and phtype in [HAL_U32, HAL_S32]:
+            if (mbtOrder(pmtype[0])) >= MBT_ABCDEFGH and phtype in [HAL_U32, HAL_S32]:
                 pwarn("Haltype destination '{}' is smaller than Modbus source type {} in {}"
                         .format(HALNAMES[phtype], MBNAMES[pmtype[0]], lpl))
 
-            if (((pmtype[0] & MBT_X_MASK) >= MBT_ABCD and 0 != (regofs & 1))
-                or ((pmtype[0] & MBT_X_MASK) >= MBT_ABCDEFGH and 0 != (regofs & 3))):
+            if ((mbtOrder(pmtype[0]) >= MBT_ABCD and 0 != (regofs & 1))
+                or (mbtOrder(pmtype[0]) >= MBT_ABCDEFGH and 0 != (regofs & 3))):
                 pwarn("Multi-register type '{}' not aligned to natural boundary in {}".format(MBNAMES[pmtype[0]], lpl))
 
             pinlist.append({'pin': pintag, 'mtype': pmtype[0], 'htype': phtype, 'flags': pf, 'regofs': regofs})
-            regofs += MBTBYTESIZES[pmtype[0] & MBT_X_MASK] // 2
+            regofs += MBTBYTESIZES[mbtOrder(pmtype[0])] // 2
         # endfor pin in cmd
         if err:
             continue
@@ -1291,7 +1265,7 @@ def handleCommands(commands):
                 regofs += 1
             else:
                 pinlist.append({'pin': pintag, 'mtype': defmtype[0], 'htype': defhtype, 'flags': pflags, 'regofs': regofs})
-                regofs += MBTBYTESIZES[defmtype[0] & MBT_X_MASK] // 2
+                regofs += MBTBYTESIZES[mbtOrder(defmtype[0])] // 2
             pinlistall.append(pintag)
         if err:
             continue
