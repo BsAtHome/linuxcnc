@@ -191,6 +191,7 @@ typedef struct {
 	hal_float_t **scales;	// All HAL pin scales
 	hal_data_u **offsets;	// All HAL pin offsets
 	hal_float_t **scaleds;	// All HAL pin scaled outputs
+	hal_bit_t *reset;		// Reset command errors on rising edge
 	hal_bit_t *fault;
 	hal_u32_t *faultcmd;
 	hal_u32_t *lasterror;
@@ -237,6 +238,7 @@ typedef struct {
 	unsigned	npins;		// Total number of pins
 
 	hm2_modbus_hal_t *hal;	// HAL pins and params
+	bool		prevreset;	// Last state of 'reset' hal pin
 
 	hm2_modbus_cmd_t *_init;	// List of inits sent initially
 	hm2_modbus_cmd_t *_cmds;	// List of commands sent in loop
@@ -516,6 +518,18 @@ static void process(void *arg, long period)
 			inst->cmds[i].interval -= period;	// Keep counting nanoseconds
 	}
 	inst->timeout  -= period;
+
+	// Re-enable all commands on rising edge of reset pin
+	bool b = !!inst->hal->reset;	// Make sure its value is bool-worthy
+	if(inst->prevreset != b) {
+		inst->prevreset = !inst->prevreset;
+		if(inst->prevreset) {
+			for(unsigned i = 0; i < inst->ncmds; i++) {
+				inst->cmds[i].disabled = 0;
+				inst->cmds[i].errors = 0;
+			}
+		}
+	}
 
 	switch(inst->state) {
 	case STATE_START:
@@ -1175,6 +1189,9 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		// The target mtype can only be MBT_AB or MBT_BA (single reg write)
 		CHK_RV(ch_append16(ch, ch->cmd.addr));
 		switch(ch->typeptr[0].htype) {
+		case HAL_BIT:
+			map_u(ch, hal->pins[p]->b ? 1 : 0, 0);
+			break;
 		case HAL_U32:
 			switch(mtypetype(ch->typeptr[0].mtype)) {
 			case MBT_U: map_u(ch, hal->pins[p]->u, 0); break;
@@ -1268,6 +1285,9 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 				regpos += 2;
 			}
 			switch(ch->typeptr[i].htype) {
+			case HAL_BIT:
+				map_u(ch, hal->pins[p]->b ? 1 : 0, i);
+				break;
 			case HAL_U32:
 				switch(mtypetype(ch->typeptr[i].mtype)) {
 				case MBT_U: map_u(ch, hal->pins[p]->u, i); break;
@@ -1519,6 +1539,8 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	if(bytes[0] != ch->cmd.mbid) {
 		MSG_ERR("%s: error: Modbus device address mismatch: got 0x%02x, expected 0x%02x\n", inst->name, bytes[0], ch->cmd.mbid);
 		// FIXME: Actually don't know whether we should resend here...
+		// It might be another master interfering with the reply
+		force_resend(inst);
 		return -1;
 	}
 
@@ -1604,6 +1626,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 			default:
 				// This is inconsistent!
 				MSG_ERR("%s: error: Invalid mtype %u for command %d\n", inst->name, mtypeformat(ch->typeptr[i].mtype), inst->cmdidx);
+				ch->disabled = 1;
 				return -1;
 			}
 			// val64.s contains the 8 bytes sign extended if necessary
@@ -1644,6 +1667,9 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 			// val64.f is the (promoted) fp value for MBT_F
 
 			switch(ch->typeptr[i].htype) {
+			case HAL_BIT:
+				hal->pins[p]->b = 0 != val64.u;	// Zero maps to false, anything else to true
+				break;
 			case HAL_U32:
 				switch(mtypetype(ch->typeptr[i].mtype)) {
 				case MBT_U:	hal->pins[p]->u = unmap32_uu(ch, val64.u, i); break;
@@ -1732,6 +1758,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		return -1;
 	default:
 		MSG_ERR("%s: error: Unknown or unsupported Modbus function code: 0x%02x (mbid=%u, cmd=%u)\n", inst->name, bytes[1], bytes[0], inst->cmdidx);
+		force_resend(inst);
 		set_error(ch);
 		return -1;
 	}
@@ -1909,7 +1936,7 @@ static ssize_t read_mbccb(const hm2_modbus_inst_t *inst, const char *fname, hm2_
 static int check_htype(unsigned type)
 {
 	switch(type) {
-	//case HAL_BIT:	// not valid in register read/write
+	case HAL_BIT:	// not valid in register read/write
 	case HAL_U32:
 	case HAL_S32:
 	case HAL_U64:
@@ -2457,6 +2484,7 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
 
+		CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->reset),     comp_id, "%s.reset", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->fault),     comp_id, "%s.fault", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->faultcmd),  comp_id, "%s.fault-command", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->lasterror), comp_id, "%s.last-error", inst->name));
@@ -2561,10 +2589,9 @@ int rtapi_app_main(void)
 					switch(cmd->typeptr[j].htype) {
 					default:
 					case HAL_BIT:
-						MSG_ERR("%s: error: Invalid hal pin type HAL_BIT in command function %d\n",
-								inst->name, cmd->cmd.func);
-						retval = -EINVAL;
-						goto errout;
+						CHECK(hal_pin_bit_newf(dir, (hal_bit_t**)&(inst->hal->pins[p++]),
+								comp_id, "%s.%s", inst->name, CPTR(dptr)));
+						break;
 
 					case HAL_U32:
 						CHECK(hal_pin_u32_newf(dir, (hal_u32_t**)&(inst->hal->pins[p++]),
