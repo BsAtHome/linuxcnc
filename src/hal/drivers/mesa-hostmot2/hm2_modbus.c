@@ -2189,7 +2189,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		}
 
 		// Type pointer /content/ must be % 4 aligned
-		if(0 != (cmdsptr[c].typeptr + 1) % 4) {
+		if(cmdsptr[c].typeptr && 0 != (cmdsptr[c].typeptr + 1) % 4) {
 			MSG_ERR("%s: error: Mbccb cmds %u types' data alignment mismatch %u %% 4 != 0\n",
 						inst->name, c, cmdsptr[c].typeptr + 1);
 			goto errout;
