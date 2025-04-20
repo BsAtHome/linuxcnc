@@ -2491,7 +2491,8 @@ int rtapi_app_main(void)
 		// Copy the loop command control structure data
 		for(unsigned i = 0; i < inst->ncmds; i++) {
 			inst->_cmds[i].cmd = inst->cmdsptr[i];
-			inst->_cmds[i].typeptr = (hm2_modbus_mbccb_type_t *)(inst->dataptr + inst->cmdsptr[i].typeptr);
+			if(inst->cmdsptr[i].typeptr)
+				inst->_cmds[i].typeptr = (hm2_modbus_mbccb_type_t *)(inst->dataptr + inst->cmdsptr[i].typeptr + 1);
 		}
 
 		// Setup to start sending init or command packets
