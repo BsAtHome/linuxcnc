@@ -142,6 +142,9 @@ other setup values as attributes:
 * 'duplex': [full,half]
   Whether 2-wire (half duplex) or 4-wire (full duplex) communication is set.
   Default half.
+* 'icdelay': [auto, 1..255]
+  The maximum allowed inter-character delay between two received characters in
+  bit-times. Default: auto.
 * 'interval': [0..3600000000]
   The default command repeat interval in micro-seconds. This is effectively the
   time between repeating the '<commands>' list (sending writes and receiving

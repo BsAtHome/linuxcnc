@@ -95,6 +95,7 @@ configparams = {'baudrate'  : '9600',
                 'rxdelay'   : 'AUTO',
                 'txdelay'   : 'AUTO',
                 'drivedelay': '1',
+                'icdelay'   : 'AUTO',
                 'interval'  : '0',
                 'timeout'   : 'AUTO' }
 
@@ -113,6 +114,7 @@ CONFIGLIMITS = {'baudrate'  : [1200, 1000000],
                 'rxdelay'   : [15, 1020],
                 'txdelay'   : [17, 1020],
                 'drivedelay': [0, 31],
+                'icdelay'   : [0, 255], # 0 signals auto
                 'interval'  : [0, MAXINTERVAL],  # As-fast-as possible to ... seconds
                 'timeout'   : [10000, 10000000] } # 10 milliseconds to 10 seconds (can override in <command>)
 
@@ -279,8 +281,8 @@ MBCCB_CMDF_INITMASK = 0x0007 # sum of allowed flags in init
 MBCCB_CMDF_MASK     = 0x000f # sum of all above flags
 
 # Allowed attributes in <mesamodbus>
-MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'interval', 'parity',
-               'rxdelay',  'stopbits',   'timeout',  'txdelay' ]
+MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
+               'parity',   'rxdelay',    'stopbits', 'timeout', 'txdelay' ]
 
 # Allowed attributes in <commands>/<command>
 CMDSATTRIB = [ 'address',     'bcanswer', 'clamp',   'count',    'delay',
@@ -493,6 +495,10 @@ def verifyConfigParams(n):
                     configparams['txdelay'] = "{}".format(bittimes + 1)
             except ValueError as e:
                 err = True
+
+    # Set inter-character delay to auto calculation in driver
+    if 'AUTO' == configparams['icdelay']:
+        configparams['icdelay'] = 0
 
     # Set timeout to zero for auto calculation
     if 'AUTO' == configparams['timeout']:
@@ -1553,7 +1559,9 @@ def main():
     #   rtapi_u16 txdelay;  // Tx t3.5
     #   rtapi_u16 rxdelay;  // Rx t3.5
     #   rtapi_u16 drvdelay; // Delay from output enable to tx start
-    #   rtapi_u32 unused[8];
+    #   rtapi_u16 icdelay;	// Rx inter-character timeout (t1.5)
+    #   rtapi_u16 unused1;
+    #   rtapi_u32 unused2[7];
     #   rtapi_u32 initlen;  // Length of init section
     #   rtapi_u32 cmdslen;  // Length of command section
     #   rtapi_u32 datalen;  // Length of data table
@@ -1562,13 +1570,14 @@ def main():
     par = [0, MBCCB_FORMAT_PARITYEN | MBCCB_FORMAT_PARITYODD, MBCCB_FORMAT_PARITYEN, 0]
     stp = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
     dpl = MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
-    header = (struct.pack(">8sIHHHHIIIIIIIIIII",
+    header = (struct.pack(">8sIHHHHHHIIIIIIIIII",
                         b'MesaMB01',
                         configparams['baudrate'],
                         par[configparams['parity']] | stp | dpl,
                         configparams['txdelay'],
                         configparams['rxdelay'],
                         configparams['drivedelay'],
+                        configparams['icdelay'],
                         0, 0, 0, 0, 0, 0, 0, 0,
                         32*len(ilb), 32*len(cmb), dlblen))
 
