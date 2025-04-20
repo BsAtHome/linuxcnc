@@ -344,7 +344,10 @@ def checkInt(s, k):
     try:
         val = int(s[k], 0)
     except ValueError as err:
-        perr("Invalid integer '{}'".format(s))
+        perr("Invalid integer '{}'".format(s[k]))
+        return None
+    except TypeError as err:
+        perr("Invalid integer value type '{}'".format(s[k]))
         return None
     return val
 
@@ -357,10 +360,13 @@ def checkFlt(s, k):
     try:
         val = float(s[k])
     except ValueError as err:
-        perr("Invalid float '{}'".format(s))
+        perr("Invalid float '{}'".format(s[k]))
         return None
     except OverflowError as err:
-        perr("Invalid float range '{}'".format(s))
+        perr("Invalid float range '{}'".format(s[k]))
+        return None
+    except TypeError as err:
+        perr("Invalid float value type '{}'".format(s[k]))
         return None
     return val
 
@@ -498,7 +504,7 @@ def verifyConfigParams(n):
 
     # Set inter-character delay to auto calculation in driver
     if 'AUTO' == configparams['icdelay']:
-        configparams['icdelay'] = 0
+        configparams['icdelay'] = '0'
 
     # Set timeout to zero for auto calculation
     if 'AUTO' == configparams['timeout']:
@@ -517,6 +523,9 @@ def verifyConfigParams(n):
             configparams[k] = p
         except ValueError as e:
             perr("Attribute '{}' must be an integer number".format(k))
+            err = True
+        except TypeError as e:
+            perr("Attribute '{}' has an invalid value type '{}'".format(k, v))
             err = True
     return err
 
@@ -1376,6 +1385,10 @@ def main():
         print("  baudrate  : {}".format(configparams['baudrate']))
         print("  parity    : {}".format(['None', 'Odd', 'Even'][configparams['parity']]))
         print("  stopbits  : {}".format(configparams['stopbits']))
+        if 0 == configparams['icdelay']:
+            print("  icdelay   : auto")
+        else:
+            print("  icdelay   : {} bits".format(configparams['icdelay']))
         print("  rxdelay   : {} bits".format(configparams['rxdelay']))
         print("  txdelay   : {} bits".format(configparams['txdelay']))
         print("  drivedelay: {} bits".format(configparams['drivedelay']))
