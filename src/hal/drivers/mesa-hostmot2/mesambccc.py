@@ -593,26 +593,24 @@ def getBoolean(attrib, name):
     if 'F' == a or 'FALSE' == a or '0' == a:
         return False
     pwarn("Expected boolean value in attribute '{}'".format(attrib[name]))
-    return False
+    return None
 
 #
 # Parse optional attribute flags
 #
-def parseOptFlags(dev, attrs, defcflags, defpflags):
-    cflags = defcflags
+def parseOptFlags(dev, attrs, cflags, pflags):
     cflags |= MBCCB_CMDF_TIMESOUT if getBoolean(attrs, 'timesout') else 0
     cflags |= MBCCB_CMDF_BCANSWER if getBoolean(attrs, 'bcanswer') else 0
     cflags |= MBCCB_CMDF_NOANSWER if getBoolean(attrs, 'noanswer') else 0
     cflags |= MBCCB_CMDF_RESEND   if getBoolean(attrs, 'resend')   else 0
     # Scale and clamp can be default on. This allows them to be turned off.
-    pflags = defpflags
     pflags |= MBCCB_PINF_SCALE  if getBoolean(attrs, 'scale')     else 0
     pflags |= MBCCB_PINF_CLAMP  if getBoolean(attrs, 'clamp')     else 0
-    pflags &= ~MBCCB_PINF_SCALE if not getBoolean(attrs, 'scale') else ~0
-    pflags &= ~MBCCB_PINF_CLAMP if not getBoolean(attrs, 'clamp') else ~0
+    pflags &= ~MBCCB_PINF_SCALE if False == getBoolean(attrs, 'scale') else ~0
+    pflags &= ~MBCCB_PINF_CLAMP if False == getBoolean(attrs, 'clamp') else ~0
     if 'broadcast' != dev and 0 != (cflags & MBCCB_CMDF_BCANSWER):
         perr("Cannot use 'bcanswer' attribute on non-broadcast target '{}'".format(dev));
-    return (cflags, pflags)
+    return cflags, pflags
 
 #
 # Calculate the timeout for a command based on the number of bytes
@@ -735,7 +733,7 @@ def handleInits(inits):
             continue
 
         # Get optional attrib flags
-        (cflags, pflags) = parseOptFlags(device, cmd.attrib, 0, 0)
+        cflags, pflags = parseOptFlags(device, cmd.attrib, 0, 0)
         if 0 != cflags & ~MBCCB_CMDF_INITMASK:
             pwarn("Additional flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_INITMASK, lil))
 
@@ -1097,7 +1095,7 @@ def handleCommands(commands):
         # clamp is default on all pins
         defpflag  = MBCCB_PINF_SCALE if defhtype == HAL_FLT else 0
         defpflag |= MBCCB_PINF_CLAMP if function in REGFUNCTIONS else 0
-        (cflags, pflags) = parseOptFlags(device, cmd.attrib, 0, defpflag)
+        cflags, pflags = parseOptFlags(device, cmd.attrib, 0, defpflag)
         if 0 != cflags & ~MBCCB_CMDF_MASK:
             pwarn("Additional cmd flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_MASK, lcl))
         if 0 != pflags & ~MBCCB_PINF_MASK:
@@ -1217,7 +1215,7 @@ def handleCommands(commands):
                 err = True
                 break
             # scale and clamp flags
-            (cf, pf) = parseOptFlags(device, pin.attrib, 0, pflags)
+            cf, pf = parseOptFlags(device, pin.attrib, 0, pflags)
             if (pf & MBCCB_PINF_SCALE) and phtype in [HAL_U32, HAL_U64]:
                 pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lpl))
                 pf &= ~MBCCB_PINF_SCALE
