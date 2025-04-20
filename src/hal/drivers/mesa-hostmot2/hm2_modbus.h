@@ -35,7 +35,9 @@ typedef struct {
 	rtapi_u16	txdelay;	// Tx inter-frame timeout (t3.5)
 	rtapi_u16	rxdelay;	// Rx inter-frame timeout (t3.5)
 	rtapi_u16	drvdelay;	// Delay from output enable to tx start
-	rtapi_u32	unused[8];
+	rtapi_u16	icdelay;	// Rx inter-character timeout (t1.5)
+	rtapi_u16	unused1;
+	rtapi_u32	unused2[7];
 	rtapi_u32	initlen;	// Length of init section
 	rtapi_u32	cmdslen;	// Length of command section
 	rtapi_u32	datalen;	// Length of data table

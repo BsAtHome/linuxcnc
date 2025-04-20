@@ -198,6 +198,7 @@ typedef struct {
 	hal_u32_t baudrate;	// RO
 	hal_u32_t parity;	// RO
 	hal_u32_t stopbits;	// RO
+	hal_u32_t icdelay;	// RO Inter character delay
 	hal_u32_t txdelay;	// RW Inter frame delay for packets sent
 	hal_u32_t rxdelay;	// RW Inter frame delay for packet end detection in receive
 	hal_u32_t drvdelay;	// RW Delay before sending data (in bit times)
@@ -250,6 +251,8 @@ typedef struct {
 
 	int			state;			// State-machine state
 	int			ignoredata;		// Ignore received packet if set
+	unsigned	rxversion;		// The version of the PktUART RX channel
+	unsigned	txversion;		// The version of the PktUART TX channel
 	unsigned	maxicharbits;	// The max allowed inter-character delay (in bit-times)
 
 	unsigned	frameidx;	// Which frame we are handling (should only ever be 0)
@@ -316,17 +319,22 @@ RTAPI_MP_INT(debug, "Set message level for debugging purpose [0...5] where 0=non
 static int do_setup(hm2_modbus_inst_t *inst, int queue)
 {
 	int r;
+	unsigned v, xmax;
 
 	if    (inst->cfg_tx.ifdelay    == inst->hal->txdelay
 		&& inst->cfg_rx.ifdelay    == inst->hal->rxdelay
 		&& inst->cfg_tx.drivedelay == inst->hal->drvdelay) return 0;
 
-	if(inst->hal->txdelay > 0x3fc) inst->hal->txdelay = 0x3fc;
-	if(inst->hal->rxdelay > 0x3fc) inst->hal->rxdelay = 0x3fc;
-	if(inst->hal->drvdelay > 0x1f) inst->hal->drvdelay = 0x1f;
-	inst->cfg_tx.ifdelay    = inst->hal->txdelay;
-	inst->cfg_rx.ifdelay    = inst->hal->rxdelay;
-	inst->cfg_tx.drivedelay = inst->hal->drvdelay;
+	xmax = inst->txversion < 3 ? 0xff : 0x3fc;
+	if((v = inst->hal->txdelay) > xmax) inst->hal->txdelay = v = xmax;
+	inst->cfg_tx.ifdelay = v;
+
+	xmax = inst->rxversion < 3 ? 0xff : 0x3fc;
+	if((v = inst->hal->rxdelay) > xmax) inst->hal->rxdelay = v = xmax;
+	inst->cfg_rx.ifdelay = v;
+
+	if((v = inst->hal->drvdelay) > 0x1f) inst->hal->drvdelay = v = 0x1f;
+	inst->cfg_tx.drivedelay = v;
 
 	if((r = hm2_pktuart_config(inst->uart, &inst->cfg_rx, &inst->cfg_tx, queue)) < 0) {
 		MSG_ERR("%s: error: PktUART setup problem: error=%d\n", inst->name, r);
@@ -508,6 +516,7 @@ static void process(void *arg, long period)
 	hm2_modbus_inst_t *inst = (hm2_modbus_inst_t *)arg;
 
 	int r;
+	rtapi_u32 frsize;
 
 	rtapi_u32 rxstatus = hm2_pktuart_get_rx_status(inst->uart);
 	rtapi_u32 txstatus = hm2_pktuart_get_tx_status(inst->uart);
@@ -785,33 +794,36 @@ wait_for_data_frame:
 fetch_more_data:
 		MSG_DBG("FETCH_(MORE_)DATA Index %u Frames 0x%04x 0x%04x 0x%04x 0x%04x\n",
 			inst->frameidx, inst->fsizes[0], inst->fsizes[1], inst->fsizes[2], inst->fsizes[3]);
-		if(inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
-			MSG_WARN("%s: warning: reply to command %u had an error bit set in fsize (0x%04x), dropping\n",
-					inst->name, inst->cmdidx,
-					inst->fsizes[inst->frameidx] & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT));
+		frsize = inst->fsizes[inst->frameidx];
+		if(frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
+			const char *eor = (frsize & HM2_PKTUART_RCR_ERROROVERRUN)  ? " OVERRUN"  : "";
+			const char *esb = (frsize & HM2_PKTUART_RCR_ERRORSTARTBIT) ? " STARTBIT" : "";
+			MSG_WARN("%s: warning: reply to command %u had an error%s%s set in fsize (0x%04x), dropping\n",
+					inst->name, inst->cmdidx, eor, esb,
+					frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT));
 			set_error(&inst->cmds[inst->cmdidx]);
 			queue_reset(inst);
 			force_resend(inst);
 		}
-		if(HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]) > MAX_PKT_LEN) { // indicates an overrun
+		if(HM2_PKTUART_RCR_NBYTES_VAL(frsize) > MAX_PKT_LEN) { // indicates an overrun
 			MSG_WARN("%s: warning: reply to command %u had packet size overrun (%u > %u), dropping\n",
 					inst->name, inst->cmdidx,
-					HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]), MAX_PKT_LEN);
+					HM2_PKTUART_RCR_NBYTES_VAL(frsize), MAX_PKT_LEN);
 			set_error(&inst->cmds[inst->cmdidx]);
 			queue_reset(inst);
 			force_resend(inst);
 			break;
 		}
-		if(inst->maxicharbits && HM2_PKTUART_RCR_ICHARBITS_VAL(inst->fsizes[inst->frameidx]) > inst->maxicharbits) {
+		if(inst->maxicharbits && HM2_PKTUART_RCR_ICHARBITS_VAL(frsize) > inst->maxicharbits) {
 			MSG_WARN("%s: warning: reply to command %u had too long inter-character delay (%u > %u), dropping\n",
 					inst->name, inst->cmdidx,
-					HM2_PKTUART_RCR_ICHARBITS_VAL(inst->fsizes[inst->frameidx]), inst->maxicharbits);
+					HM2_PKTUART_RCR_ICHARBITS_VAL(frsize), inst->maxicharbits);
 			set_error(&inst->cmds[inst->cmdidx]);
 			force_resend(inst);
 			break;
 		}
 		inst->rxdata[0] = 0;	// This will fail the parse packet if the read did not resolve
-		r = hm2_pktuart_queue_read_data(inst->uart, inst->rxdata, HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[inst->frameidx]));
+		r = hm2_pktuart_queue_read_data(inst->uart, inst->rxdata, HM2_PKTUART_RCR_NBYTES_VAL(frsize));
 		if(r < 0)
 			MSG_ERR("%s: error: hm2_pktuart_queue_read_data() returned an error: %d\n", inst->name, r);	// What to do...
 		// The above queued read doesn't resolve until the next cycle.
@@ -850,7 +862,7 @@ fetch_more_data:
 		MSG_ERR("%s: error: Unknown state (%d) in process(), setting START state\n", inst->name, inst->state);
 		*(inst->hal->fault) = 1;
 		*(inst->hal->lasterror) = EINVAL;
-		*(inst->hal->faultcmd) = 0;
+		*(inst->hal->faultcmd) = inst->cmdidx;
 		set_state(inst, STATE_START);
 		break;
 	}
@@ -1982,6 +1994,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 	mbccb->txdelay  = be16_to_cpu(mbccb->txdelay);
 	mbccb->rxdelay  = be16_to_cpu(mbccb->rxdelay);
 	mbccb->drvdelay = be16_to_cpu(mbccb->drvdelay);
+	mbccb->icdelay  = be16_to_cpu(mbccb->icdelay);
 	//for(unsigned i = 0; i < sizeof(mbccb->unused)/sizeof(mbccb->unused[0]); i++)
 	//	mbccb->unused[i] = be32_to_cpu(mbccb->unused[i]);
 	mbccb->initlen  = be32_to_cpu(mbccb->initlen);
@@ -1996,6 +2009,26 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 
 	if((mbccb->format & MBCCB_FORMAT_PARITYODD) && !(mbccb->format & MBCCB_FORMAT_PARITYEN)) {
 		MSG_ERR("%s: error: Mbccb parity Odd set while parity disabled\n", inst->name);
+		goto errout;
+	}
+
+	if(mbccb->rxdelay > 0x3fc) {
+		MSG_ERR("%s: error: Mbccb rxdelay %u out of range [0..1020]\n", inst->name, mbccb->rxdelay);
+		goto errout;
+	}
+
+	if(mbccb->txdelay > 0x3fc) {
+		MSG_ERR("%s: error: Mbccb txdelay %u out of range [0..1020]\n", inst->name, mbccb->txdelay);
+		goto errout;
+	}
+
+	if(mbccb->drvdelay > 0x1f) {
+		MSG_ERR("%s: error: Mbccb drivedelay %u out of range [0..31]\n", inst->name, mbccb->drvdelay);
+		goto errout;
+	}
+
+	if(mbccb->icdelay > 0x3fc) {
+		MSG_ERR("%s: error: Mbccb icdelay %u out of range [0..255]\n", inst->name, mbccb->icdelay);
 		goto errout;
 	}
 
@@ -2480,6 +2513,7 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->baudrate), comp_id, "%s.baudrate", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->parity),   comp_id, "%s.parity", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->stopbits), comp_id, "%s.stopbits", inst->name));
+		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->icdelay),  comp_id, "%s.icdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->txdelay),  comp_id, "%s.txdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
@@ -2517,19 +2551,51 @@ int rtapi_app_main(void)
 		inst->cfg_rx.filterrate = 0;	// Zero means 2 times baudrate
 		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXEN;
 		if(!(inst->mbccb->format & MBCCB_FORMAT_DUPLEX))
-			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXMASKEN;	// Set rx masking is half-duplex
+			inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXMASKEN;	// Set rx masking if half-duplex
+		// FIXME: 'Drive Auto' has precedence over 'Drive Enable'. It should
+		// work for both 2-wire and 4-wire setups. We could remove the enable.
 		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_DRIVEEN | HM2_PKTUART_CONFIG_DRIVEAUTO;
 
 		if((retval = hm2_pktuart_get_version(inst->uart)) < 0) {
 			MSG_ERR("%s: error: Cannot get PktUART version (error=%d)\n", inst->name, retval);
 			goto errout;
 		}
+		inst->rxversion = (retval >> 4) & 0x0f;
+		inst->txversion = retval & 0x0f;
+
+		// Older versions have no 2 stopbits, a bug in inter-frame length, no
+		// extended inter-frame length setting and no max. inter-character
+		// timing measurement.
+		if(inst->rxversion < 3 || inst->txversion < 3) {
+			MSG_WARN("%s: warning: PktUART version is less than 3 (Rx=%u Tx=%u). Please consider upgrading.\n",
+					inst->name, inst->rxversion, inst->txversion);
+			if(stopbits > 1) {
+				MSG_WARN("%s: warning: Old PktUART cannot set two stop-bits. Setting to one.\n", inst->name);
+				stopbits = 1;
+			}
+			if(inst->txversion < 3 && inst->mbccb->txdelay > 0xff) {
+				MSG_WARN("%s: warning: Old PktUART cannot set txdelay to 0x%04x. Clamping to 0xff.\n",
+						inst->name, inst->mbccb->txdelay);
+				inst->mbccb->txdelay = 0xff;
+			}
+			if(inst->rxversion < 3 && inst->mbccb->rxdelay > 0xff) {
+				MSG_WARN("%s: warning: Old PktUART cannot set rxdelay to 0x%04x. Clamping to 0xff.\n",
+						inst->name, inst->mbccb->rxdelay);
+				inst->mbccb->rxdelay = 0xff;
+			}
+			if(inst->rxversion < 3 && inst->mbccb->icdelay != 0) {
+				MSG_WARN("%s: warning: Old PktUART cannot set icdelay, disabling.\n", inst->name);
+				inst->mbccb->icdelay = 0;
+			}
+		}
 
 		// A V3+ RX has inter-character delay measurement
 		// t1.5: see section 2.5.5.1 of
 		// of "MODBUS over serial line specification and implementation guide V1.02"
-		if(((retval >> 4) & 0x0f) >= 3) {
-			if(inst->mbccb->baudrate <= 19200) {
+		if(inst->rxversion >= 3) {
+			if(inst->mbccb->icdelay) {
+				inst->maxicharbits = inst->mbccb->icdelay; // Manually set in mbccb
+			} else if(inst->mbccb->baudrate <= 19200) {
 				unsigned bits = 8 + (parity ? 1 : 0) + stopbits;
 				inst->maxicharbits = (15 * bits + 14) / 10;	// 1.5 char delay
 			} else {
@@ -2539,6 +2605,7 @@ int rtapi_app_main(void)
 		} else {
 			inst->maxicharbits = 0;
 		}
+		inst->hal->icdelay = inst->maxicharbits;
 
 		MSG_DBG("%s: inst->name     : %s\n", inst->name, inst->name);
 		MSG_DBG("%s: inst->uart     : %s\n", inst->name, inst->uart);
@@ -2546,6 +2613,7 @@ int rtapi_app_main(void)
 		MSG_DBG("%s: inst->ninit    : %u\n", inst->name, inst->ninit);
 		MSG_DBG("%s: inst->ncmds    : %u\n", inst->name, inst->ncmds);
 		MSG_DBG("%s: inst->npins    : %u\n", inst->name, inst->npins);
+		MSG_DBG("%s: inst->icdelay  : %u\n", inst->name, inst->maxicharbits);
 		MSG_DBG("%s: inst->mbccb->txdelay  : %u\n", inst->name, inst->mbccb->txdelay);
 		MSG_DBG("%s: inst->mbccb->rxdelay  : %u\n", inst->name, inst->mbccb->rxdelay);
 		MSG_DBG("%s: inst->mbccb->drvdelay : %u\n", inst->name, inst->mbccb->drvdelay);
