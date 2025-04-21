@@ -99,8 +99,8 @@ The driver exposes the following pins:
 * 'fault' (HAL_BIT, output):
   Indicates a fault condition.
 * 'fault-command' (HAL_U32, output):
-  The command index that caused the fault condition.
-* 'last-error' (HAL_U32, output):
+  The command index that caused the latest fault condition.
+* 'last-error-code' (HAL_U32, output):
   The errno value of the error that cause the fault condition.
 * 'reset' (HAL_BIT, input):
   Reset all commands error counters and re-enable disabled commands.
@@ -116,6 +116,32 @@ The driver exposes the following pins:
   It may be prudent to issue a delay command as the first init command to
   ensure flushing all values before reading pin data that will be transferred
   to the Modbus device(s).
+
+Each command in the MBCCB (not init commands) will generate a set of pins to
+reflect the current state, where NN is the command number counting from zero
+(00):
+
+* 'command.NN.disabled' (HAL_BIT, output):
+  Set if the command is no longer sent in the commands loop.
+* 'command.NN.errors' (HAL_U32, output):
+  The number of errors seen in this command. The command will be disabled when
+  this count reaches three (3).
+* 'command.NN.error-code' (HAL_U32, output):
+  The errno code of the last error. The following error codes can be set:
+
+  ** 5,  0x05 (EIO): The receiver got an overrun or a false start-bit was detected.
+  ** 9,  0x09 (EBADF): The reply returned an unsupported function.
+  ** 22, 0x16 (EINVAL): An invalid value was detected (internal error).
+  ** 27, 0x1b (EFBIG): The received packet size exceeds the internally allocated buffer.
+  ** 34, 0x22 (ERANGE): The received data was too small or the message's length indicator was wrong.
+  ** 42, 0x2a (ENOMSG): The inter-character delay was too long and the packet was dropped.
+  ** 44, 0x2c (ECHRNG): The reply had a different function than the sent function.
+  ** 52, 0x34 (EBADE): The CRC of the received packet was wrong.
+  ** 74, 0x4a (EBADMSG): The reply had the error-bit set.
+  ** 75, 0x4b (EOVERFLOW): The received packet was larger than the maximum 256 bytes.
+  ** 90, 0x5a (EMSGSIZE): The message did not fit into the maximum PDU size of 253.
+  ** 110, 0x6e (ETIMEDOUT): The command timed out and no response was received.
+
 
 Each mbccb file will generate a set of pins as defined in the mbccb file. See
 *mesambccc*(1) for details.
