@@ -462,7 +462,7 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 		inst->timeout = 25000000;	// 25 milliseconds
 		break;
 	case STATE_START:
-		if(inst->hal->suspend) {
+		if(*(inst->hal->suspend)) {
 			inst->suspended = 1;
 		}
 		inst->ignoredata = 0;	// Re-enable data handling
@@ -522,7 +522,7 @@ static void process(void *arg, long period)
 	hm2_modbus_inst_t *inst = (hm2_modbus_inst_t *)arg;
 
 	if(inst->suspended) {
-		if(!inst->hal->suspend)
+		if(!*(inst->hal->suspend))
 			inst->suspended = 0;
 		else
 			return;
