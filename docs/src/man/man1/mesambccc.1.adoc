@@ -164,6 +164,10 @@ other setup values as attributes:
 * 'stopbits': [1,2]
   Communication number of stopbits. This attribute requires PktUART V3+ to have
   any effect. Default 1.
+* 'suspend': [Boolean]
+  Start with suspended communication when set. This enables you to setup pin,
+  scale and offset values in the HAL file(s) using setp/sets commands before
+  data is written to any Modbus device. Default false.
 * 'timeout' [auto,10000..10000000]
   The standard time a command may take in micro-seconds (send request plus
   handling plus receive reply) before the command is deemed lost. The special
