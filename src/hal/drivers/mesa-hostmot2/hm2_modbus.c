@@ -191,6 +191,7 @@ typedef struct {
 	hal_float_t **scales;	// All HAL pin scales
 	hal_data_u **offsets;	// All HAL pin offsets
 	hal_float_t **scaleds;	// All HAL pin scaled outputs
+	hal_bit_t *suspend;		// Suspend running commands
 	hal_bit_t *reset;		// Reset command errors on rising edge
 	hal_bit_t *fault;
 	hal_u32_t *faultcmd;
@@ -250,6 +251,7 @@ typedef struct {
 	hm2_pktuart_config_t cfg_tx;	// Transmitter config
 
 	int			state;			// State-machine state
+	bool		suspended;		// Suspend operation when set
 	int			ignoredata;		// Ignore received packet if set
 	unsigned	rxversion;		// The version of the PktUART RX channel
 	unsigned	txversion;		// The version of the PktUART TX channel
@@ -452,6 +454,7 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 
 	inst->state = newstate;	// Switch over
 
+
 	// Entry actions
 	switch(newstate) {
 	case STATE_RESET_WAIT:
@@ -459,6 +462,9 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 		inst->timeout = 25000000;	// 25 milliseconds
 		break;
 	case STATE_START:
+		if(inst->hal->suspend) {
+			inst->suspended = 1;
+		}
 		inst->ignoredata = 0;	// Re-enable data handling
 		next_command(inst);
 		break;
@@ -514,6 +520,13 @@ static int oldst = -1;
 static void process(void *arg, long period)
 {
 	hm2_modbus_inst_t *inst = (hm2_modbus_inst_t *)arg;
+
+	if(inst->suspended) {
+		if(!inst->hal->suspend)
+			inst->suspended = 0;
+		else
+			return;
+	}
 
 	int r;
 	rtapi_u32 frsize;
@@ -2519,6 +2532,7 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
 
+		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->suspend),   comp_id, "%s.suspend", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->reset),     comp_id, "%s.reset", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->fault),     comp_id, "%s.fault", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->faultcmd),  comp_id, "%s.fault-command", inst->name));
@@ -2628,7 +2642,7 @@ int rtapi_app_main(void)
 		*(inst->hal->fault)     = 0;
 		*(inst->hal->faultcmd)  = 0;
 		*(inst->hal->lasterror) = 0;
-
+		*(inst->hal->suspend)   = inst->suspended = 0 != (inst->mbccb->format & MBCCB_FORMAT_SUSPEND);
 
 		unsigned p = 0;
 #define CPTR(x)	((const char *)((x) + 1))

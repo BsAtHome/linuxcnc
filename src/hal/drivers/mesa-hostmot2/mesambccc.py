@@ -81,10 +81,12 @@ MBCCB_FORMAT_PARITYEN_BIT  = 0 # bits 0 Enable parity if set
 MBCCB_FORMAT_PARITYODD_BIT = 1 # bits 1 Odd parity if set
 MBCCB_FORMAT_STOPBITS2_BIT = 2 # bit  2 0=8x1 1=8x2
 MBCCB_FORMAT_DUPLEX_BIT    = 3 # bit  3 Set for full-duplex (rx-mask off)
+MBCCB_FORMAT_SUSPEND_BIT   = 4 # bit  4 Set if state-machine starts suspended
 MBCCB_FORMAT_PARITYEN      = (1 << MBCCB_FORMAT_PARITYEN_BIT)
 MBCCB_FORMAT_PARITYODD     = (1 << MBCCB_FORMAT_PARITYODD_BIT)
 MBCCB_FORMAT_STOPBITS2     = (1 << MBCCB_FORMAT_STOPBITS2_BIT)
 MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_DUPLEX_BIT)
+MBCCB_FORMAT_SUSPEND       = (1 << MBCCB_FORMAT_SUSPEND_BIT)
 
 # Default parameters for serial communication.
 # These can be overridden in the root tag as attributes.
@@ -97,6 +99,7 @@ configparams = {'baudrate'  : '9600',
                 'drivedelay': '1',
                 'icdelay'   : 'AUTO',
                 'interval'  : '0',
+                'suspend'   : '0',
                 'timeout'   : 'AUTO' }
 
 # Allowed values for the parity attribute
@@ -116,6 +119,7 @@ CONFIGLIMITS = {'baudrate'  : [1200, 1000000],
                 'drivedelay': [0, 31],
                 'icdelay'   : [0, 255], # 0 signals auto
                 'interval'  : [0, MAXINTERVAL],  # As-fast-as possible to ... seconds
+                'suspend'   : [0, 1],   # Set to start suspended
                 'timeout'   : [10000, 10000000] } # 10 milliseconds to 10 seconds (can override in <command>)
 
 # XXX: Keep in sync with hal.h
@@ -260,7 +264,7 @@ FUNCTIONS = { 'R_COILS'    : [R_COILS,    2000],  '1': [R_COILS,    2000],
 FUNCNAMES = { R_COILS: 'R_COILS', R_INPUTREGS: 'R_INPUTREGS', R_INPUTS: 'R_INPUTS', R_REGISTERS: 'R_REGISTERS',
               W_COIL:  'W_COIL',  W_REGISTER:  'W_REGISTER',  W_COILS:  'W_COILS',  W_REGISTERS: 'W_REGISTERS' }
 
-WRITEFUNCTIONS = [ 'W_COIL', 'W_REGISTER', 'W_COILS', 'W_REGISTERS' ]
+WRITEFUNCTIONS = [ W_COIL, W_REGISTER, W_COILS, W_REGISTERS ]
 
 # These functions always use HAL_BIT
 # Also, the function is a register function if /not/ in this set
@@ -282,7 +286,8 @@ MBCCB_CMDF_MASK     = 0x000f # sum of all above flags
 
 # Allowed attributes in <mesamodbus>
 MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
-               'parity',   'rxdelay',    'stopbits', 'timeout', 'txdelay' ]
+               'parity',   'rxdelay',    'stopbits', 'suspend', 'timeout',
+               'txdelay' ]
 
 # Allowed attributes in <commands>/<command>
 CMDSATTRIB = [ 'address',     'bcanswer', 'clamp',   'count',    'delay',
@@ -428,6 +433,20 @@ def mangle64(d, mtype):
     sys.exit("Invalid mtype '{}' in mangle64".format(mtype))
 
 #
+# Get a boolean value
+#
+def getBoolean(attrib, name):
+    if name not in attrib:
+        return None
+    a = attrib[name].upper()
+    if 'T' == a or 'TRUE' == a or '1' == a:
+        return True
+    if 'F' == a or 'FALSE' == a or '0' == a:
+        return False
+    pwarn("Expected boolean value in '{}' attribute, not '{}'".format(name, attrib[name]))
+    return None
+
+#
 # Create a list of flags
 #
 def cflagList(flags):
@@ -506,6 +525,10 @@ def verifyConfigParams(n):
     if 'AUTO' == configparams['icdelay']:
         configparams['icdelay'] = '0'
 
+    # Fixup suspend boolean
+    b = getBoolean(n, 'suspend')
+    configparams['suspend'] = '1' if True == b else '0'
+
     # Set timeout to zero for auto calculation
     if 'AUTO' == configparams['timeout']:
         configparams['timeout'] = '0'
@@ -580,20 +603,6 @@ def handleDevices(devs):
         pwarn("No devices defined other than broadcast")
 
     return devlist
-
-#
-# Get a boolean value
-#
-def getBoolean(attrib, name):
-    if name not in attrib:
-        return None
-    a = attrib[name].upper()
-    if 'T' == a or 'TRUE' == a or '1' == a:
-        return True
-    if 'F' == a or 'FALSE' == a or '0' == a:
-        return False
-    pwarn("Expected boolean value in attribute '{}'".format(attrib[name]))
-    return None
 
 #
 # Parse optional attribute flags
@@ -775,7 +784,7 @@ def handleInits(inits):
             checkAttribs(data.attrib, DATAATTRIB, ldl)
 
             # Write function must have data
-            if FUNCNAMES[function] not in WRITEFUNCTIONS:
+            if function not in WRITEFUNCTIONS:
                 perr("Only write function can have <data> tag(s) in {}".format(data.tag, lil))
                 err = True
                 break
@@ -1054,7 +1063,7 @@ def handleCommands(commands):
         function = cmd.attrib['function'].upper()
         # check depends on unicast or broadcast
         if 'broadcast' == device and function not in WRITEFUNCTIONS:
-            perr("Function '{}' not available from {} for broadcast in {}".format(function, str(list(WRITEFUNCTIONS.keys())), lcl))
+            perr("Function '{}' not available for broadcast in {}".format(FUNCNAMES[function], lcl))
             continue
         elif function not in FUNCTIONS:
             perr("Function '{}' not defined in {} in {}".format(function, str(list(FUNCTIONS.keys())), lcl))
@@ -1307,7 +1316,7 @@ def handleCommands(commands):
             print("Command {:2}: {} {}({}) addr=0x{:04x} flags={} interval={} timeout={}"
                 .format(len(cmdlist), device, FUNCNAMES[function], function, address, cflagList(cflags),
                         interval, timeout))
-            io = "in " if FUNCNAMES[function] in WRITEFUNCTIONS else "out"
+            io = "in " if function in WRITEFUNCTIONS else "out"
             for p in range(len(pinlist)):
                 pin = pinlist[p]
                 if HAL_BIT == pin['htype']:
@@ -1317,10 +1326,13 @@ def handleCommands(commands):
                 print("  pin {:2} ({}): {:24} {} flags={} addr=0x{:04x}".format(p+1, io, pin['pin'],
                         mbn, pflagList(pin['flags']), address + pin['regofs']))
                 if pin['flags'] & MBCCB_PINF_SCALE:
-                    pt = "FLOAT" if pin['htype'] == HAL_FLT else "S64"
-                    print("         (in ): {:24} HAL_{}".format(pin['pin']+".offset", pt))
+                    if function in WRITEFUNCTIONS:
+                        pt = HALNAMES[pin['htype']]
+                    else:
+                        pt = {MBT_U: "HAL_U64", MBT_S: "HAL_S64", MBT_F: "HAL_FLOAT"}[mbtType(pin['mtype'])]
+                    print("         (in ): {:24} {}".format(pin['pin']+".offset", pt))
                     print("         (in ): {:24} HAL_FLOAT".format(pin['pin']+".scale"))
-                    if FUNCNAMES[function] not in WRITEFUNCTIONS:
+                    if function not in WRITEFUNCTIONS:
                         print("         (out): {:24} HAL_FLOAT".format(pin['pin']+".scaled"))
     # end for cmd in commands:
 
@@ -1579,13 +1591,14 @@ def main():
     #   rtapi_u32 datalen;  // Length of data table
     # } hm2_modbus_mbccb_header_t;
 
-    par = [0, MBCCB_FORMAT_PARITYEN | MBCCB_FORMAT_PARITYODD, MBCCB_FORMAT_PARITYEN, 0]
-    stp = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
-    dpl = MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
+    par  = [0, MBCCB_FORMAT_PARITYEN | MBCCB_FORMAT_PARITYODD, MBCCB_FORMAT_PARITYEN, 0]
+    flg  = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
+    flg |= MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
+    flg |= MBCCB_FORMAT_SUSPEND if configparams['suspend'] else 0
     header = (struct.pack(">8sIHHHHHHIIIIIIIIII",
                         b'MesaMB01',
                         configparams['baudrate'],
-                        par[configparams['parity']] | stp | dpl,
+                        par[configparams['parity']] | flg,
                         configparams['txdelay'],
                         configparams['rxdelay'],
                         configparams['drivedelay'],

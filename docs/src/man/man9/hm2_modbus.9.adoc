@@ -72,20 +72,20 @@ addf hm2_7i96s.0.write    servo-thread
 
 * 'baudrate' (HAL_U32, RO):
   The communication baudrate
-* 'parity' (HAL_U32, RO):
-  The communication parity (0=None, 1=Odd, 2=Even)
-* 'stopbits' (HAL_U32, RO):
-  The communication number of stopbits
-* 'icdelay' (HAL_U32, RO):
-  The maximum inter-character delay accepted in received frames in bit-times.
-  Set to zero (0) when disabled.
-* 'txdelay' (HAL_U32, RW):
-  The inter-frame delay inserted after a packet in bit-times.
-* 'rxdelay' (HAL_U32, RW):
-  The inter-frame delay required before a packet is accepted in bit-times.
 * 'drive-delay' (HAL_U32, RW):
   The transmitter wait time between enabling the transmitter and sending starts
   in bit-times.
+* 'icdelay' (HAL_U32, RO):
+  The maximum inter-character delay accepted in received frames in bit-times.
+  Set to zero (0) when disabled.
+* 'parity' (HAL_U32, RO):
+  The communication parity (0=None, 1=Odd, 2=Even)
+* 'rxdelay' (HAL_U32, RW):
+  The inter-frame delay required before a packet is accepted in bit-times.
+* 'stopbits' (HAL_U32, RO):
+  The communication number of stopbits
+* 'txdelay' (HAL_U32, RW):
+  The inter-frame delay inserted after a packet in bit-times.
 
 There is normally no need to alter any parameters. Only the inter-frame delay
 and drive delay may be altered at runtime to tune the hardware bus for badly
@@ -96,14 +96,26 @@ file to be set correctly as defaults.
 
 The driver exposes the following pins:
 
-* 'reset' (HAL_BIT, input):
-  Reset all commands error counters and re-enable disabled commands.
 * 'fault' (HAL_BIT, output):
   Indicates a fault condition.
 * 'fault-command' (HAL_U32, output):
   The command index that caused the fault condition.
 * 'last-error' (HAL_U32, output):
   The errno value of the error that cause the fault condition.
+* 'reset' (HAL_BIT, input):
+  Reset all commands error counters and re-enable disabled commands.
+* 'suspend' (HAL_BIT, input):
+  Suspend all activity while set. The default can be set in the MBCCB file. +
+  Suspended start (when set in the MBCCB file) can ensure that all HAL files
+  and commands are parsed and executed (like setp and sets commands) before
+  Modbus communication starts. This enables you to setup scale and offset pins
+  without bad values being pushed to the Modbus device(s). The _last_ HAL
+  command after setting all relevant pins and signals would be to enable Modbus
+  communication by isssuing: +
+  setp hm2_modbus.0.suspend false +
+  It may be prudent to issue a delay command as the first init command to
+  ensure flushing all values before reading pin data that will be transferred
+  to the Modbus device(s).
 
 Each mbccb file will generate a set of pins as defined in the mbccb file. See
 *mesambccc*(1) for details.
