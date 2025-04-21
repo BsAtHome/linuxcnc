@@ -2286,20 +2286,20 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 			xregofs = 0;
 			for(unsigned x = 0; x < cmdsptr[c].pincnt; x++) {
 				if(!mtypeisvalid(xtype[x].mtype)) {
-					MSG_ERR("%s: error: Mbccb cmds %u has invalid xtype modbustype %u\n", inst->name, c, xtype[x].mtype);
+					MSG_ERR("%s: error: Mbccb cmds %u, pin %u has invalid modbustype %u\n", inst->name, c, x, xtype[x].mtype);
 					goto errout;
 				}
 				if(check_htype(xtype[x].htype) < 0) {
-					MSG_ERR("%s: error: Mbccb cmds %u has invalid xtype haltype %u\n", inst->name, c, xtype[x].htype);
+					MSG_ERR("%s: error: Mbccb cmds %u, pin %u has invalid haltype %u\n", inst->name, c, x, xtype[x].htype);
 					goto errout;
 				}
 				if(xtype[x].htype & ~MBCCB_PINF_MASK) {
-					MSG_ERR("%s: error: Mbccb cmds %u has invalid xtype flags 0x%02x\n", inst->name, c, xtype[x].flags);
+					MSG_ERR("%s: error: Mbccb cmds %u, pin %u has invalid flags 0x%02x\n", inst->name, c, x, xtype[x].flags);
 					goto errout;
 				}
 				unsigned mbs = mtypesize(xtype[x].mtype);
 				if(xtype[x].regofs < xregofs || xtype[x].regofs > 125-mbs) {
-					MSG_ERR("%s: error: Mbccb cmds %u has invalid xtype register offset 0x%02x\n", inst->name, c, xtype[x].regofs);
+					MSG_ERR("%s: error: Mbccb cmds %u, pin %u has invalid register offset 0x%02x\n", inst->name, c, x, xtype[x].regofs);
 					goto errout;
 				}
 				xregofs = xtype[x].regofs + mbs;

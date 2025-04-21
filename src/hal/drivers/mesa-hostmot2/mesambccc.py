@@ -676,7 +676,7 @@ def getDevice(attrib, ers):
     # Device must be known
     dev = attrib['device']
     if dev not in devices:
-        perr("Device name '{}' not found in devices list {}".format(device, ers))
+        perr("Device name '{}' not found in devices list {}".format(dev, ers))
         return None
     return dev
 
@@ -1314,13 +1314,14 @@ def handleCommands(commands):
                     mbn = 'HAL_BIT<=>BIT'
                 else:
                     mbn = '{}<=>{}'.format(HALNAMES[pin['htype']], MBNAMES[pin['mtype']])
-                print("  pin {:2} ({}): {:20} {} flags={} addr=0x{:04x}".format(p+1, io, pin['pin'],
+                print("  pin {:2} ({}): {:24} {} flags={} addr=0x{:04x}".format(p+1, io, pin['pin'],
                         mbn, pflagList(pin['flags']), address + pin['regofs']))
                 if pin['flags'] & MBCCB_PINF_SCALE:
-                    print("              : {}.offset".format(pin['pin']))
-                    print("              : {}.scale".format(pin['pin']))
+                    pt = "FLOAT" if pin['htype'] == HAL_FLT else "S64"
+                    print("         (in ): {:24} HAL_{}".format(pin['pin']+".offset", pt))
+                    print("         (in ): {:24} HAL_FLOAT".format(pin['pin']+".scale"))
                     if FUNCNAMES[function] not in WRITEFUNCTIONS:
-                        print("              : {}.scaled".format(pin['pin']))
+                        print("         (out): {:24} HAL_FLOAT".format(pin['pin']+".scaled"))
     # end for cmd in commands:
 
     return cmdlist
