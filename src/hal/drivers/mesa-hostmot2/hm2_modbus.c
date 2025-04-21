@@ -191,6 +191,9 @@ typedef struct {
 	hal_float_t **scales;	// All HAL pin scales
 	hal_data_u **offsets;	// All HAL pin offsets
 	hal_float_t **scaleds;	// All HAL pin scaled outputs
+	hal_bit_t **cmddisableds; // Command disable
+	hal_u32_t **cmderrors;	// Command error counters
+	hal_u32_t **cmderrcodes; // Last error code
 	hal_bit_t *suspend;		// Suspend running commands
 	hal_bit_t *reset;		// Reset command errors on rising edge
 	hal_bit_t *fault;
@@ -346,10 +349,22 @@ static int do_setup(hm2_modbus_inst_t *inst, int queue)
 	return 1;
 }
 
-static inline void set_error(hm2_modbus_cmd_t *ch)
+static void set_error(hm2_modbus_inst_t *inst, int errcode)
 {
-	if(++ch->errors > 3)
+	if(inst->cmds == inst->_init) {
+		// No individual pins for init commands, use global
+		*(inst->hal->fault) = 1;
+		*(inst->hal->faultcmd) = inst->cmdidx;
+		*(inst->hal->lasterror) = errcode;
+		return;
+	}
+	hm2_modbus_cmd_t *ch = &inst->cmds[inst->cmdidx];
+	if(++ch->errors > 3 || ch->disabled) {
 		ch->disabled = 1;
+		*(inst->hal->cmddisableds[inst->cmdidx]) = ch->disabled;
+		*(inst->hal->cmderrcodes[inst->cmdidx])  = errcode;
+	}
+	*(inst->hal->cmderrors[inst->cmdidx]) = ch->errors;
 }
 
 static int send_modbus_pkt(hm2_modbus_inst_t *inst)
@@ -493,11 +508,11 @@ static void do_timeout(hm2_modbus_inst_t *inst)
 		}
 		MSG_DBG("Timeout reset %s(%d)\n", state_names[inst->state], inst->state);
 		queue_reset(inst);
-		*(inst->hal->lasterror) = ETIME;
+		*(inst->hal->lasterror) = ETIMEDOUT;
 		*(inst->hal->fault) = 1;
 		*(inst->hal->faultcmd) = inst->cmdidx;
 		force_resend(inst);
-		set_error(&inst->cmds[inst->cmdidx]);
+		set_error(inst, ETIMEDOUT);
 		set_state(inst, STATE_START);
 	}
 }
@@ -542,13 +557,16 @@ static void process(void *arg, long period)
 	inst->timeout  -= period;
 
 	// Re-enable all commands on rising edge of reset pin
-	bool b = !!inst->hal->reset;	// Make sure its value is bool-worthy
+	bool b = !!*(inst->hal->reset);	// Make sure its value is bool-worthy
 	if(inst->prevreset != b) {
 		inst->prevreset = !inst->prevreset;
 		if(inst->prevreset) {
 			for(unsigned i = 0; i < inst->ncmds; i++) {
 				inst->cmds[i].disabled = 0;
 				inst->cmds[i].errors = 0;
+				*(inst->hal->cmddisableds[i]) = 0;
+				*(inst->hal->cmderrors[i])    = 0;
+				*(inst->hal->cmderrcodes[i])  = 0;
 			}
 		}
 	}
@@ -591,7 +609,7 @@ retry_next_init:
 				memcpy(ch->data, dptr + 1, *dptr);	// Packet is prepared as data
 				ch->datalen = *dptr;
 				if((r = send_modbus_pkt(inst)) < 0) {	// This will attach CRC
-					set_error(ch);
+					set_error(inst, -r);
 					// Failure means we just move to the next
 					MSG_ERR("%s: error: Failed to send init command %u\n", inst->name, inst->cmdidx);
 					if(!next_command(inst))	// Until we wrap the command list
@@ -677,7 +695,7 @@ retry_next_init:
 				// the command is our only option.
 				MSG_ERR("%s: error: Build data frame failed command %d, disabling\n", inst->name, inst->cmdidx);
 				ch->disabled = 1;
-				ch->errors++;
+				set_error(inst, -r);
 				continue; // Just try next command
 			}
 			if(r || hasresend(ch)) { // if data has changed or forced
@@ -692,7 +710,7 @@ retry_next_init:
 						// the application, but that should be OK.
 						MSG_ERR("%s: error: Command %d disabled\n", inst->name, inst->cmdidx);
 						ch->disabled = 1;
-						ch->errors++;
+						set_error(inst, EMSGSIZE);
 						continue; // Just try next command
 					}
 					MSG_ERR("%s: error: Send PDU failed (error %d) command %d, resetting\n", inst->name, r, inst->cmdidx);
@@ -814,7 +832,7 @@ fetch_more_data:
 			MSG_WARN("%s: warning: reply to command %u had an error%s%s set in fsize (0x%04x), dropping\n",
 					inst->name, inst->cmdidx, eor, esb,
 					frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT));
-			set_error(&inst->cmds[inst->cmdidx]);
+			set_error(inst, EIO);
 			queue_reset(inst);
 			force_resend(inst);
 		}
@@ -822,7 +840,7 @@ fetch_more_data:
 			MSG_WARN("%s: warning: reply to command %u had packet size overrun (%u > %u), dropping\n",
 					inst->name, inst->cmdidx,
 					HM2_PKTUART_RCR_NBYTES_VAL(frsize), MAX_PKT_LEN);
-			set_error(&inst->cmds[inst->cmdidx]);
+			set_error(inst, EOVERFLOW);
 			queue_reset(inst);
 			force_resend(inst);
 			break;
@@ -831,7 +849,7 @@ fetch_more_data:
 			MSG_WARN("%s: warning: reply to command %u had too long inter-character delay (%u > %u), dropping\n",
 					inst->name, inst->cmdidx,
 					HM2_PKTUART_RCR_ICHARBITS_VAL(frsize), inst->maxicharbits);
-			set_error(&inst->cmds[inst->cmdidx]);
+			set_error(inst, ENOMSG);
 			force_resend(inst);
 			break;
 		}
@@ -1537,7 +1555,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 
 	if(rxcount > sizeof(bytes)) {
 		MSG_ERR("%s: error: Received PDU larger than buffer (%u > %zu), truncating\n", inst->name, rxcount, sizeof(bytes));
-		set_error(ch);
+		set_error(inst, EFBIG);
 		rxcount = sizeof(bytes);
 	}
 
@@ -1548,7 +1566,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	// 2 bytes CRC
 	if(rxcount < 5) {
 		MSG_ERR("%s: error: Received PDU too small, size=%u\n", inst->name, rxcount);
-		set_error(ch);
+		set_error(inst, ERANGE);
 		force_resend(inst);
 		return -1;
 	}
@@ -1571,7 +1589,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 
 	if((bytes[1] & 0x7f ) != ch->cmd.func) {
 		MSG_ERR("%s: error: Call/response function number mismatch: got 0x%02x, expected 0x%02x)\n", inst->name, ch->cmd.func, bytes[1]);
-		set_error(ch);
+		set_error(inst, ECHRNG);
 		force_resend(inst);
 		return -1;
 	}
@@ -1580,7 +1598,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	rtapi_u16 retcrc = ((rtapi_u16)bytes[rxcount - 1] << 8) | bytes[rxcount - 2];
 	if(retcrc != checksum) {
 		MSG_ERR("%s: error: Modbus checksum error: got 0x%04x, expected 0x%04x\n", inst->name, retcrc, checksum);
-		set_error(ch);
+		set_error(inst, EBADE);
 		force_resend(inst);
 		return -1;
 	}
@@ -1592,7 +1610,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		// coils/inputs/registers read in one pass.
 		// 2000 bits  : n = 125 bytes (commands 1 and 2)
 		if(test_bytecount(inst, bytes, rxcount, 1, 125) < 0) {
-			set_error(ch);
+			set_error(inst, ERANGE);
 			force_resend(inst);
 			break;
 		}
@@ -1610,7 +1628,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		if(bytes[2] != ch->cmd.regcnt * 2) {
 			MSG_ERR("%s: error: Cmd response data length %u was expected to be %u\n",
 					inst->name, (unsigned)bytes[2], ch->cmd.regcnt * 2);
-			set_error(ch);
+			set_error(inst, ERANGE);
 			force_resend(inst);
 			break;
 		}
@@ -1652,6 +1670,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 				// This is inconsistent!
 				MSG_ERR("%s: error: Invalid mtype %u for command %d\n", inst->name, mtypeformat(ch->typeptr[i].mtype), inst->cmdidx);
 				ch->disabled = 1;
+				set_error(inst, EINVAL);
 				return -1;
 			}
 			// val64.s contains the 8 bytes sign extended if necessary
@@ -1774,7 +1793,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	case (128 + MBCMD_W_COILS):		// 15 + error bit
 	case (128 + MBCMD_W_REGISTERS):	// 16 + error bit
 		force_resend(inst);
-		set_error(ch);
+		set_error(inst, EBADMSG);
 		if(bytes[2] >= (sizeof(error_codes) / sizeof(*error_codes))) {
 			MSG_ERR("%s: error: Modbus error response cmd %u function %u with invalid/unknown error code %u\n", inst->name, inst->cmdidx, bytes[1] & 0x7f, bytes[2]);
 		} else {
@@ -1784,7 +1803,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	default:
 		MSG_ERR("%s: error: Unknown or unsupported Modbus function code: 0x%02x (mbid=%u, cmd=%u)\n", inst->name, bytes[1], bytes[0], inst->cmdidx);
 		force_resend(inst);
-		set_error(ch);
+		set_error(inst, EBADF);
 		return -1;
 	}
 	return 0;
@@ -2480,6 +2499,21 @@ int rtapi_app_main(void)
 			retval = -ENOMEM;
 			goto errout;
 		}
+		if(!(inst->hal->cmddisableds = (hal_bit_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmddisableds)))) {
+			MSG_ERR("%s: error: Failed to allocate HAL cmddisableds memory\n", inst->name);
+			retval = -ENOMEM;
+			goto errout;
+		}
+		if(!(inst->hal->cmderrors = (hal_u32_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmderrors)))) {
+			MSG_ERR("%s: error: Failed to allocate HAL cmderrors memory\n", inst->name);
+			retval = -ENOMEM;
+			goto errout;
+		}
+		if(!(inst->hal->cmderrcodes = (hal_u32_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmderrcodes)))) {
+			MSG_ERR("%s: error: Failed to allocate HAL cmderrcodes memory\n", inst->name);
+			retval = -ENOMEM;
+			goto errout;
+		}
 
 		if(inst->ninit > 0) {
 			// Allocate inits memory
@@ -2536,7 +2570,7 @@ int rtapi_app_main(void)
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->reset),     comp_id, "%s.reset", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->fault),     comp_id, "%s.fault", inst->name));
 		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->faultcmd),  comp_id, "%s.fault-command", inst->name));
-		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->lasterror), comp_id, "%s.last-error", inst->name));
+		CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->lasterror), comp_id, "%s.last-error-code", inst->name));
 
 		inst->hal->baudrate = inst->cfg_rx.baudrate = inst->cfg_tx.baudrate = inst->mbccb->baudrate;
 		unsigned parity = 0;
@@ -2647,6 +2681,15 @@ int rtapi_app_main(void)
 		unsigned p = 0;
 #define CPTR(x)	((const char *)((x) + 1))
 		for(unsigned c = 0; c < inst->ncmds; c++) {
+			// First create command status pins
+			CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->cmddisableds[c]),
+					comp_id, "%s.command.%02d.disabled", inst->name, c));
+			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmderrors[c]),
+					comp_id, "%s.command.%02d.errors", inst->name, c));
+			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmderrcodes[c]),
+					comp_id, "%s.command.%02d.error-code", inst->name, c));
+
+			// Now create the pins associated with the command
 			hm2_modbus_cmd_t *cmd = &inst->_cmds[c];
 			int dir = HAL_IN;
 			const rtapi_u8 *dptr = inst->dataptr + cmd->cmd.dataptr;
