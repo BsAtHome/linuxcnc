@@ -88,9 +88,14 @@ MBCCB_FORMAT_STOPBITS2     = (1 << MBCCB_FORMAT_STOPBITS2_BIT)
 MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_DUPLEX_BIT)
 MBCCB_FORMAT_SUSPEND       = (1 << MBCCB_FORMAT_SUSPEND_BIT)
 
+# Values for parity internally
+PARITY_NONE = 0
+PARITY_ODD  = 1
+PARITY_EVEN = 2
+
 # Default parameters for serial communication.
 # These can be overridden in the root tag as attributes.
-configparams = {'baudrate'  : '9600',
+CONFIGDEFAULT= {'baudrate'  : '9600',
                 'parity'    : 'E',      # Translates into N=0, O=1, E=2
                 'stopbits'  : '1',
                 'duplex'    : 'HALF',
@@ -101,6 +106,8 @@ configparams = {'baudrate'  : '9600',
                 'interval'  : '0',
                 'suspend'   : '0',
                 'timeout'   : 'AUTO' }
+
+configparams = CONFIGDEFAULT
 
 # Allowed values for the parity attribute
 PARITIES = {'N':    '0', 'O':   '1', 'E':    '2',
@@ -114,8 +121,8 @@ CONFIGLIMITS = {'baudrate'  : [1200, 1000000],
                 'parity'    : [0, 2],
                 'stopbits'  : [1, 2],
                 'duplex'    : [0, 1],   # half/full
-                'rxdelay'   : [15, 1020],
-                'txdelay'   : [17, 1020],
+                'rxdelay'   : [0, 1020],
+                'txdelay'   : [0, 1020],
                 'drivedelay': [0, 31],
                 'icdelay'   : [0, 255], # 0 signals auto
                 'interval'  : [0, MAXINTERVAL],  # As-fast-as possible to ... seconds
@@ -281,8 +288,11 @@ MBCCB_CMDF_TIMESOUT = 0x0001
 MBCCB_CMDF_BCANSWER = 0x0002
 MBCCB_CMDF_NOANSWER = 0x0004
 MBCCB_CMDF_RESEND   = 0x0008
-MBCCB_CMDF_INITMASK = 0x0007 # sum of allowed flags in init
-MBCCB_CMDF_MASK     = 0x000f # sum of all above flags
+MBCCB_CMDF_PARITYEN = 0x0100
+MBCCB_CMDF_PARITYODD= 0x0200
+MBCCB_CMDF_STOPBITS2= 0x0400
+MBCCB_CMDF_INITMASK = 0x0707 # sum of allowed flags in init
+MBCCB_CMDF_MASK     = 0x000f # sum of allowed normal flags
 
 # Allowed attributes in <mesamodbus>
 MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
@@ -306,8 +316,12 @@ INITATTRIB = [ 'address',  'bcanswer', 'count',   'delay',       'device',
 # Allowed attributes in <initlist>/<command>/<data>
 DATAATTRIB = [ 'modbustype', 'value' ]
 
+# Allowed attributes in <initlist><command> for comms change
+RATEATTRIB = [ 'baudrate', 'drivedelay', 'icdelay', 'parity',
+               'rxdelay',  'stopbits',   'txdelay' ]
+
 # Allowed attributes in <*>/<command delay="...">
-DELAYATTRIB = [ 'device', 'delay']
+DELAYATTRIB = [ 'delay' ]
 
 #
 # Program invocation message
@@ -447,6 +461,14 @@ def getBoolean(attrib, name):
     return None
 
 #
+# Get 'auto' or '%d xxx' format
+#
+def getAutoFmt(val, suffix):
+    if suffix:
+        suffix = " " + suffix
+    return "auto" if 0 == val else "{}{}".format(val, suffix)
+
+#
 # Create a list of flags
 #
 def cflagList(flags):
@@ -465,76 +487,42 @@ def pflagList(flags):
 #
 # Merge and check comms config from root element attributes
 #
-def verifyConfigParams(n):
-    global configparams
+def verifyConfigParams(cfg):
     err = False
-    # Merge attributes
-    configparams = configparams | n;
     # Make it case insensitive
-    configparams = { k: v.upper() for k,v in configparams.items() }
+    cfg = { k: v.upper() for k,v in cfg.items() }
     # Fixup parity
-    if configparams['parity'] not in PARITIES:
+    if cfg['parity'] not in PARITIES:
         perr("Attribute 'parity' must be 'E', 'O' or 'N'.")
         err = True
-        configparams['parity'] = 'E'
-    configparams['parity'] = PARITIES[configparams['parity']]
+        cfg['parity'] = 'E'
+    cfg['parity'] = PARITIES[cfg['parity']]
     # Fixup duplex
-    if configparams['duplex'] not in DUPLEXES:
+    if cfg['duplex'] not in DUPLEXES:
         perr("Attribute 'duplex' must be 'full' or 'half'.")
         err = True
-        configparams['parity'] = 'FULL'
-    configparams['duplex'] = DUPLEXES[configparams['duplex']]
+        cfg['parity'] = 'FULL'
+    cfg['duplex'] = DUPLEXES[cfg['duplex']]
 
-    if 'AUTO' == configparams['rxdelay'] or 'AUTO' == configparams['txdelay']:
-        # rxdelay and txdelay are bit-time based for baudrates <= 19200. The
-        # timeouts are fixed at higher baudrates (remark in bottom of section
-        # 2.5.1.1):
-        #  - t1.5 =  750 microseconds
-        #  - t3.5 = 1750 microseconds
-        # We only use t3.5.
-        try:
-            baudrate = int(configparams['baudrate'], 0)
-        except ValueError as e:
-            perr("Baudrate must be an integer number".format(k))
-            return True
-        if baudrate > 582000:
-            # with this baudrate, bittimes would be 1020
-            pwarn("Baudrate > 582000 will make inter-frame timer overflow. Setting rxdelay and txdelay to maximum.")
-            pwarn("You must manually set both rxdelay and txdelay attributes to override.")
-            if 'AUTO' == configparams['rxdelay']:
-                configparams['rxdelay'] = '1020'
-            if 'AUTO' == configparams['txdelay']:
-                configparams['txdelay'] = '1020'
-        else:
-            bittimes = (1750 * baudrate + 999999) // 1000000
-            try:
-                par = int(configparams['parity'], 0)
-                stp = int(configparams['stopbits'], 0)
-                bittimes = 10
-                bittimes += 1 if par != 0 else 0
-                bittimes += 1 if stp > 1 else 0
-                bittimes = math.ceil(bittimes * 3.5)
-                if 'AUTO' == configparams['rxdelay']:
-                    configparams['rxdelay'] = "{}".format(bittimes - 1)
-                if 'AUTO' == configparams['txdelay']:
-                    configparams['txdelay'] = "{}".format(bittimes + 1)
-            except ValueError as e:
-                err = True
+    if 'AUTO' == cfg['rxdelay']:
+        cfg['rxdelay'] = '0'
+    if 'AUTO' == cfg['txdelay']:
+        cfg['txdelay'] = '0'
 
     # Set inter-character delay to auto calculation in driver
-    if 'AUTO' == configparams['icdelay']:
-        configparams['icdelay'] = '0'
+    if 'AUTO' == cfg['icdelay']:
+        cfg['icdelay'] = '0'
 
     # Fixup suspend boolean
-    b = getBoolean(n, 'suspend')
-    configparams['suspend'] = '1' if True == b else '0'
+    b = getBoolean(cfg, 'suspend')
+    cfg['suspend'] = '1' if True == b else '0'
 
     # Set timeout to zero for auto calculation
-    if 'AUTO' == configparams['timeout']:
-        configparams['timeout'] = '0'
+    if 'AUTO' == cfg['timeout']:
+        cfg['timeout'] = '0'
 
     # convert to int and check against the min/max values
-    for k, v in configparams.items():
+    for k, v in cfg.items():
         # convert to integer
         try:
             p = int(v, 0)
@@ -543,14 +531,14 @@ def verifyConfigParams(n):
                 perr("Attribute '{}' in <mesamodbus> must be between {} and {} (is set to {})"
                     .format(k, CONFIGLIMITS[k][0], CONFIGLIMITS[k][1], p))
                 err = True
-            configparams[k] = p
+            cfg[k] = p
         except ValueError as e:
             perr("Attribute '{}' must be an integer number".format(k))
             err = True
         except TypeError as e:
             perr("Attribute '{}' has an invalid value type '{}'".format(k, v))
             err = True
-    return err
+    return cfg if not err else None
 
 #
 # Parse the <devices> tag content
@@ -626,7 +614,7 @@ def parseOptFlags(dev, attrs, cflags, pflags):
 # sent/receives in worst case scenario, double it for processing and add
 # state-machine overhead.
 #
-def calcTimeout(function, count, mtype):
+def calcTimeout(function, count, mtype, cfgp):
     # Find out the byte-size of the command+reply
     if function in [R_COILS, R_INPUTS]:
         n = 8 + 5 + ((count + 7) // 8)
@@ -641,8 +629,8 @@ def calcTimeout(function, count, mtype):
     else:
         sys.exit("Unknown function '{}' in calcTimeout, aborting...".format(function))
     bits = 1 + 8 + 1
-    bits += 1 if configparams['parity'] != 0 else 0
-    bits += 1 if configparams['stopbits'] == 1 else 0
+    bits += 1 if cfgp['parity'] != 0 else 0
+    bits += 1 if cfgp['stopbits'] == 1 else 0
     bits *= n   # Number of bits send+received
     # Worst case transmission is one character per just under 2.5 character
     # times (because of max. 1.5 inter-character gap allowance).
@@ -650,7 +638,7 @@ def calcTimeout(function, count, mtype):
     # We allow the whole lot to take twice as long
     # Convert to microseconds based on baudrate
     # and add twice the state-machine base overhead based on a 1kHz servo-thread
-    return int((2 * bits * 1000000.0 + configparams['baudrate'] - 1) / configparams['baudrate']) + 2*8000
+    return int((2 * bits * 1000000.0 + cfgp['baudrate'] - 1) / cfgp['baudrate']) + 2*8000
 
 #
 # Extract the 'timeout' or 'timeoutbits' attribute and return the timeout value
@@ -715,12 +703,14 @@ def checkAttribs(have, may, suffix):
 #
 def handleInits(inits):
     initlist = []
+    cfgs = configparams # This is the default config
     for cmd in inits:
         lil = "initlist/command[{}]".format(1 + len(initlist))
         if cmd.tag != 'command':
             perr("Expected <command> tag as child of {}".format(lil))
             continue
 
+        # This may be a delay command
         if 'delay' in cmd.attrib:
             # A delay between init commands
             checkAttribs(cmd.attrib, DELAYATTRIB, lil)
@@ -731,6 +721,22 @@ def handleInits(inits):
             initlist.append({'delay': delay})
             if verbose:
                 print("Init {:2}: delay {} microseconds".format(len(initlist), delay))
+            continue
+
+        # This may be a communication override command
+        if len(set(cmd.attrib).intersection(RATEATTRIB)) > 0:
+            # Set override communication parameters
+            checkAttribs(cmd.attrib, RATEATTRIB, lil)
+            cfgs = verifyConfigParams(CONFIGDEFAULT | cmd.attrib)    # Setup new config set
+            if None == cfgs:
+                perr("Invalid communication parameters in {}".format(lil))
+                continue
+            initlist.append(cfgs)   # Includes all required indices
+            if verbose:
+                print("Init {:2}: Comms override: baudrate={}, parity={}, stopbits={}, rxdelay={}, txdelay={}, drivedelay={}, icdelay={}"
+                        .format(len(initlist), cfgs['baudrate'], ['None','Odd','Even', ''][cfgs['parity']], cfgs['stopbits'],
+                                getAutoFmt(cfgs['rxdelay'], ""), getAutoFmt(cfgs['txdelay'], ""),
+                                getAutoFmt(cfgs['drivedelay'], ""), getAutoFmt(cfgs['icdelay'], "")))
             continue
 
         # An init command
@@ -963,7 +969,7 @@ def handleInits(inits):
             continue
 
         if 0 == timeout:
-            timeout = calcTimeout(function, count, MBT_AB);
+            timeout = calcTimeout(function, count, MBT_AB, cfgs);
 
         initlist.append({'device': device, 'mbid': devices[device], 'function': function,
                          'address': address, 'data': datalist, 'timeout': timeout, 'flags': cflags })
@@ -975,6 +981,8 @@ def handleInits(inits):
 
     # end for cmd in init:
 
+    if sum([cfgs[k] != configparams[k] for k in RATEATTRIB]) > 0:
+        perr("Communication override(s) do not return to defaults. The <commands> may fail.")
     return initlist
 
 #
@@ -1306,7 +1314,7 @@ def handleCommands(commands):
             continue
 
         if 0 == timeout:
-            timeout = calcTimeout(function, regofs, MBT_AB);
+            timeout = calcTimeout(function, regofs, MBT_AB, configparams);
 
         cmdlist.append({'device': device, 'mbid': devices[device], 'function': function,
                         'timeout': timeout, 'address': address, 'count': count,
@@ -1387,26 +1395,22 @@ def main():
 
     checkAttribs(root.attrib, MESAATTRIB, "<mesamodbus>")
 
-    # Check the comms attributes
-    if verifyConfigParams(root.attrib):
+    # Merge and check the comms attributes
+    global configparams
+    configparams = verifyConfigParams(configparams | root.attrib)
+    if None == configparams:
         return 1
 
     if verbose:
-        print("Communication parameters:")
+        print("Default communication parameters:")
         print("  baudrate  : {}".format(configparams['baudrate']))
         print("  parity    : {}".format(['None', 'Odd', 'Even'][configparams['parity']]))
         print("  stopbits  : {}".format(configparams['stopbits']))
-        if 0 == configparams['icdelay']:
-            print("  icdelay   : auto")
-        else:
-            print("  icdelay   : {} bits".format(configparams['icdelay']))
-        print("  rxdelay   : {} bits".format(configparams['rxdelay']))
-        print("  txdelay   : {} bits".format(configparams['txdelay']))
+        print("  icdelay   : {}".format(getAutoFmt(configparams['icdelay'], "bits")))
+        print("  rxdelay   : {}".format(getAutoFmt(configparams['rxdelay'], "bits")))
+        print("  txdelay   : {}".format(getAutoFmt(configparams['txdelay'], "bits")))
         print("  drivedelay: {} bits".format(configparams['drivedelay']))
-        if configparams['timeout'] > 0:
-            print("  timeout   : {} microseconds".format(configparams['timeout']))
-        else:
-            print("  timeout   : auto".format(configparams['timeout']))
+        print("  timeout   : {}".format(getAutoFmt(configparams['timeout'], "microseconds")))
 
     # Parse the nodes
     global devices
@@ -1455,33 +1459,62 @@ def main():
     cmb = []    # commands binary hm2_modbus_mbccb_cmd_t
     dlb = []    # datalist binary fragments
     dlblen = 0  # datalist binary accumulated length
+
+    # Add one empty data fragment so that the data segment always has content.
+    # This will make a zero dataptr or typeptr impossible if data is to be
+    # attached to them.
+    dlb.append(struct.pack(">B", 0))
+    dlblen += 1
+
     #
     # The init commands are pre-packed, including mbid and function code. They
     # only need the CRC attached, which is done in the hm2_modbus module.
+    # The command packets have the same structure layout but different fields
+    # are used.
     #
     # typedef struct {
-    #   rtapi_u8  mbid;    // Modbus device ID
-    #   rtapi_u8  func;    // Function code, 0 for delay
-    #   rtapi_u16 addr;    // Address, 0 in init
-    #   rtapi_u16 pincnt;  // Number of pins, 0 in init
-    #   rtapi_u16 flags;   // Mostly quirks to handle, see MBCCB_CMDF_* defines
-    #   rtapi_u16 regcnt;  // Number of registers, 0 for init
-    #   rtapi_u16 unused1;
-    #   rtapi_u32 unused2;
-    #   rtapi_u32 typeptr; // Type and address offset list, 0 for init
-    #   rtapi_u32 interval;// The interval to repeat this command, 0 for init
-    #   rtapi_u32 timeout; // Response timeout or delay in microseconds
+    #   rtapi_u8  mbid;  // Modbus device ID
+    #   rtapi_u8  func;  // Function code, 0 for init
+    #   rtapi_u16 flags; // Mostly quirks to handle, see MBCCB_CMDF_* defines
+    #   union {
+    #     struct {    // Command fields
+    #       rtapi_u16 addr;     // Address
+    #       rtapi_u16 pincnt;   // Number of pins
+    #       rtapi_u16 regcnt;   // Number of registers
+    #       rtapi_u16 unusedp1; // cmds 0 (drvdly)
+    #       rtapi_u32 unusedp2; // cmds 0 (icdelay)
+    #       rtapi_u32 typeptr;  // Type and address offset list
+    #       rtapi_u32 interval; // The interval to repeat this command
+    #       rtapi_u32 timeout;  // Response timeout or delay in microseconds
+    #     };
+    #     struct {    // Init comm change fields
+    #       rtapi_u16 metacmd;  // Meta command
+    #       rtapi_u16 rxdelay;  // init comm change
+    #       rtapi_u16 txdelay;  // init comm change
+    #       rtapi_u16 drvdelay; // init comm change
+    #       rtapi_u32 icdelay;  // init comm change (unusedp1)
+    #       rtapi_u32 unusedi1; // init 0 (typeptr)
+    #       rtapi_u32 unusedi2; // init 0 (interval)
+    #       rtapi_u32 baudrate; // init comm change
+    #     };
+    #   };
     #   rtapi_u32 dataptr; // Pin names, packet data for init
     # } hm2_modbus_mbccb_cmds_t;
     #
     for i in initlist:
-        if 'delay' in i:
+        if 'delay' in i:        # meta-command 0
             ilb.append(struct.pack(">BBHHHHHIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, i['delay'], 0))
+        elif 'baudrate' in i:   # meta-command 1
+            flg  = MBCCB_CMDF_PARITYEN  if i['parity'] != 0 else 0
+            flg |= MBCCB_CMDF_PARITYODD if i['parity'] == 1 else 0
+            flg |= MBCCB_CMDF_STOPBITS2 if i['stopbits'] == 2 else 0
+            ilb.append(struct.pack(">BBHHHHHIIIII", 0, 0, flg, 1, i['rxdelay'], i['txdelay'],
+                                                    i['drivedelay'], i['icdelay'], 0, 0, i['baudrate'], 0))
         else:
             mbid = i['mbid']
             func = i['function']
             addr = i['address']
-            ilb.append(struct.pack(">BBHHHHHIIIII", mbid, func, addr, 0, i['flags'], 0, 0, 0, 0, 0, i['timeout'], dlblen))
+            ilb.append(struct.pack(">BBHHHHHIIIII", mbid, func, i['flags'], addr, 0, 0, 0, 0, 0, 0, i['timeout'], dlblen))
             # Precompile the data packet so we only need to copy it
             if func in [W_COIL, W_REGISTER]:  # Write single coil or single register
                 # mbid, func, length address and value == 6 bytes
@@ -1520,20 +1553,7 @@ def main():
             else:
                 perr("Unhandled init function mbid={}, func={}, addr={}".format(mbid, func, addr))
     #
-    # typedef struct {
-    #   rtapi_u8  mbid;    // Modbus device ID
-    #   rtapi_u8  func;    // Function code
-    #   rtapi_u16 addr;    // Address
-    #   rtapi_u16 pincnt;  // Number of pins
-    #   rtapi_u16 flags;   // Mostly quirks to handle, see MBCCB_CMDF_* defines
-    #   rtapi_u16 regcnt;  // Number of registers, 0 for init
-    #   rtapi_u16 unused1;
-    #   rtapi_u32 unused2;
-    #   rtapi_u32 typeptr; // Type and address offset list, 0 for init
-    #   rtapi_u32 interval;// The interval to repeat this command, 0 for init
-    #   rtapi_u32 timeout; // Response timeout or delay in microseconds
-    #   rtapi_u32 dataptr; // Pin names, packet data for init
-    # } hm2_modbus_mbccb_cmds_t;
+    # See structure layout above
     #
     for i in commands:
         if 'delay' in i:
@@ -1572,8 +1592,8 @@ def main():
             else:
                 typeptr = 0
 
-            cmb.append(struct.pack(">BBHHHHHIIIII", i['mbid'], i['function'], i['address'], i['count'],
-                                                     i['flags'], i['regcnt'], 0, 0,
+            cmb.append(struct.pack(">BBHHHHHIIIII", i['mbid'], i['function'], i['flags'], i['address'],
+                                                     i['count'], i['regcnt'], 0, 0,
                                                      typeptr, i['interval'], i['timeout'], pinptr))
 
     # typedef struct {
@@ -1583,7 +1603,7 @@ def main():
     #   rtapi_u16 txdelay;  // Tx t3.5
     #   rtapi_u16 rxdelay;  // Rx t3.5
     #   rtapi_u16 drvdelay; // Delay from output enable to tx start
-    #   rtapi_u16 icdelay;	// Rx inter-character timeout (t1.5)
+    #   rtapi_u16 icdelay;  // Rx inter-character timeout (t1.5)
     #   rtapi_u16 unused1;
     #   rtapi_u32 unused2[7];
     #   rtapi_u32 initlen;  // Length of init section

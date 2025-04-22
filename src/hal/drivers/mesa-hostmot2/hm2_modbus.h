@@ -49,16 +49,30 @@ typedef struct {
 // All values in Big-Endian
 typedef struct {
 	rtapi_u8	mbid;	// Modbus device ID
-	rtapi_u8	func;	// Function code, 0 for delay command
-	rtapi_u16	addr;	// Address, 0 for init
-	rtapi_u16	pincnt;	// Number of pins, 0 for init
-	rtapi_u16	flags;	// Mostly quirks to handle, see MBCCB_CMDF_* defines
-	rtapi_u16	regcnt;	// Number of registers, 0 for init
-	rtapi_u16	unused1;
-	rtapi_u32	unused2;
-	rtapi_u32	typeptr; // Type and address offset list, 0 for init
-	rtapi_u32	interval;// The interval to repeat this command, 0 for init
-	rtapi_u32	timeout; // Response timeout or delay in microseconds
+	rtapi_u8	func;	// Function code, 0 for init
+	rtapi_u16	flags;		// Mostly quirks to handle, see MBCCB_CMDF_* defines
+	union {
+		struct {	// Command fields
+			rtapi_u16	addr;		// Address
+			rtapi_u16	pincnt;		// Number of pins
+			rtapi_u16	regcnt;		// Number of registers
+			rtapi_u16	unusedp1;	// cmds 0 (drvdly)
+			rtapi_u32	unusedp2;	// cmds 0 (icdelay)
+			rtapi_u32	typeptr;	// Type and address offset list
+			rtapi_u32	interval;	// The interval to repeat this command
+			rtapi_u32	timeout;	// Response timeout or delay in microseconds
+		};
+		struct {	// Init fields
+			rtapi_u16	metacmd;	// Meta command
+			rtapi_u16	rxdelay;	// init comm change
+			rtapi_u16	txdelay;	// init comm change
+			rtapi_u16	drvdelay;	// init comm change
+			rtapi_u32	icdelay;	// init comm change (unusedp1)
+			rtapi_u32	unusedi1;	// init 0 (typeptr)
+			rtapi_u32	unusedi2;	// init 0 (interval)
+			rtapi_u32	baudrate;	// init comm change
+		};
+	};
 	rtapi_u32	dataptr; // Pin names, packet data for init
 } hm2_modbus_mbccb_cmds_t;
 
@@ -66,12 +80,15 @@ typedef struct {
 #define MBCCB_PINF_CLAMP	0x0002	// Clamp values to fit target
 #define MBCCB_PINF_MASK		0x0003	// sum of pin flags
 
-#define MBCCB_CMDF_TIMESOUT	0x0001	// Don't treat timeout as an error
-#define MBCCB_CMDF_BCANSWER	0x0002	// Broadcasts will get an answer, ignore it
-#define MBCCB_CMDF_NOANSWER	0x0004	// Don't expect an answer
-#define MBCCB_CMDF_RESEND	0x0008	// Resend the write even if no pins are changed
-#define MBCCB_CMDF_INITMASK	0x0007	// sum of allowed flags in init
-#define MBCCB_CMDF_MASK		0x000f	// sum of all above flags
+#define MBCCB_CMDF_TIMESOUT  0x0001	// Don't treat timeout as an error
+#define MBCCB_CMDF_BCANSWER  0x0002	// Broadcasts will get an answer, ignore it
+#define MBCCB_CMDF_NOANSWER  0x0004	// Don't expect an answer
+#define MBCCB_CMDF_RESEND    0x0008	// Resend the write even if no pins are changed
+#define MBCCB_CMDF_PARITYEN  0x0100	// Init-only parity change
+#define MBCCB_CMDF_PARITYODD 0x0200	// Init-only parity change
+#define MBCCB_CMDF_STOPBITS2 0x0400	// Init-only stopbits change
+#define MBCCB_CMDF_INITMASK  0x0707	// sum of allowed flags in init
+#define MBCCB_CMDF_MASK      0x000f	// sum of all above flags
 
 // Type mapping for pins/PDU register data
 // Only for R_INPUTREGS, R_REGISTERS and W_REGISTERS
