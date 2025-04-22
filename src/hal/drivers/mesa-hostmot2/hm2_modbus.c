@@ -366,7 +366,7 @@ static unsigned calc_ifdelay(hm2_modbus_inst_t *inst, unsigned baudrate, unsigne
 static int send_comms_change(hm2_modbus_inst_t *inst, hm2_modbus_cmd_t *ch)
 {
 	int r;
-	unsigned baudrate = ch->cmd.baudrate;
+	unsigned baudrate = ch->cmd.ibaudrate;
 
 	// Set new baudrate
 	inst->cfg_rx.baudrate = inst->cfg_tx.baudrate = baudrate;
@@ -394,14 +394,16 @@ static int send_comms_change(hm2_modbus_inst_t *inst, hm2_modbus_cmd_t *ch)
 	}
 
 	// Re-examine the delay parameters
-	if(ch->cmd.rxdelay)
-		inst->cfg_rx.ifdelay = ch->cmd.rxdelay;
+	if(ch->cmd.irxdelay)
+		inst->cfg_rx.ifdelay = ch->cmd.irxdelay;
 	else
 		inst->cfg_rx.ifdelay = calc_ifdelay(inst, baudrate, parity, stopbits) - 1;
-	if(ch->cmd.txdelay)
-		inst->cfg_tx.ifdelay = ch->cmd.txdelay;
+	if(ch->cmd.itxdelay)
+		inst->cfg_tx.ifdelay = ch->cmd.itxdelay;
 	else
 		inst->cfg_tx.ifdelay = calc_ifdelay(inst, baudrate, parity, stopbits) + 1;
+
+	inst->cfg_tx.drivedelay = ch->cmd.idrvdelay;
 
 	// Expose to HAL
 	inst->hal->baudrate = baudrate;
@@ -411,7 +413,7 @@ static int send_comms_change(hm2_modbus_inst_t *inst, hm2_modbus_cmd_t *ch)
 	inst->hal->txdelay  = inst->cfg_tx.ifdelay;
 	inst->hal->drvdelay = inst->cfg_tx.drivedelay;
 	// Redo the inter-character delay settings
-	setup_icdelay(inst, baudrate, parity, stopbits, ch->cmd.icdelay);
+	setup_icdelay(inst, baudrate, parity, stopbits, ch->cmd.iicdelay);
 
 	// Queue a comms change
 	if((r = hm2_pktuart_config(inst->uart, &inst->cfg_rx, &inst->cfg_tx, 1)) < 0) {
@@ -456,7 +458,7 @@ static int send_modbus_pkt(hm2_modbus_inst_t *inst)
 	ch->data[ch->datalen++] = (checksum >> 8) & 0xff;
 
 #ifdef DEBUG
-	MSG_DBG("Sending to '%s' %i bytes", inst->uart, ch->datalen);
+	MSG_DBG("Sending to cmd=%u '%s' %i bytes", inst->cmdidx, inst->uart, ch->datalen);
 	for(int i = 0; i < ch->datalen; i++) MSG_DBG(" 0x%02x", ch->data[i]);
 	MSG_DBG("\n");
 #endif
@@ -475,7 +477,7 @@ static inline void force_resend(hm2_modbus_inst_t *inst)
 	inst->cmds[inst->cmdidx].data[1] = 0xff;
 	// If this was a 'once' command, make sure it gets resend asap in the next
 	// round
-	if(inst->cmds[inst->cmdidx].cmd.interval == 0xffffffff)
+	if(inst->cmds[inst->cmdidx].cmd.cinterval == 0xffffffff)
 		inst->cmds[inst->cmdidx].interval = -1;
 }
 
@@ -519,7 +521,7 @@ static inline int next_command(hm2_modbus_inst_t *inst)
 //
 static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 {
-#ifdef DEBUG
+#ifdef DEBUG_STATE
 	if(newstate < 0 || newstate >= STATE_LAST || inst->state < 0 || inst->state > STATE_LAST) {
 		MSG_ERR("%s: error: Invalid state detected in set_state() state=%d, newstate=%d\n", inst->name, inst->state, newstate);
 		newstate = STATE_START;
@@ -534,7 +536,7 @@ static inline void set_state(hm2_modbus_inst_t *inst, int newstate)
 		// Exiting the START state means we are running a command and need to
 		// setup the timeout. If this is no command, then the timeout setting
 		// will be overridden locally in the code after the state change.
-		inst->timeout = (rtapi_s64)inst->cmds[inst->cmdidx].cmd.timeout * 1000;
+		inst->timeout = (rtapi_s64)inst->cmds[inst->cmdidx].cmd.ctimeout * 1000;
 		break;
 	}
 
@@ -577,7 +579,7 @@ static void do_timeout(hm2_modbus_inst_t *inst)
 			set_state(inst, STATE_START);
 			return;
 		}
-		MSG_DBG("Timeout reset %s(%d)\n", state_names[inst->state], inst->state);
+		MSG_DBG("Timeout reset cmd=%u %s(%d)\n", inst->cmdidx, state_names[inst->state], inst->state);
 		queue_reset(inst);
 		*(inst->hal->lasterror) = ETIMEDOUT;
 		*(inst->hal->fault) = 1;
@@ -673,19 +675,19 @@ retry_next_init:
 			hm2_modbus_cmd_t *ch = &inst->cmds[inst->cmdidx];
 			if(0 == ch->cmd.func) {
 				// Special meta command
-				if(0 == ch->cmd.metacmd) {			// This is a delay command
+				if(0 == ch->cmd.imetacmd) {			// This is a delay command
 					// The timeout will be set in set_state()
 					set_state(inst, STATE_WAIT_FOR_TIMEOUT);
-				} else if(1 == ch->cmd.metacmd) {	// This is a comms change
+				} else if(1 == ch->cmd.imetacmd) {	// This is a comms change
 					send_comms_change(inst, ch);
 					next_command(inst);	// Advance because we stay in STATE_START
 				} else {
-					MSG_ERR("%s: error: init command %u uses unknown meta-command %u\n", inst->name, inst->cmdidx, ch->cmd.metacmd);
+					MSG_ERR("%s: error: init command %u uses unknown meta-command %u\n", inst->name, inst->cmdidx, ch->cmd.imetacmd);
 					next_command(inst);
 				}
 				break;	// Meta commands will always need the next round
 			} else {
-				const rtapi_u8 *dptr = inst->dataptr + ch->cmd.dataptr;
+				const rtapi_u8 *dptr = inst->dataptr + ch->cmd.cdataptr;
 				memcpy(ch->data, dptr + 1, *dptr);	// Packet is prepared as data
 				ch->datalen = *dptr;
 				if((r = send_modbus_pkt(inst)) < 0) {	// This will attach CRC
@@ -747,9 +749,9 @@ retry_next_init:
 			// resend, then the interval is patched (see force_resend()).
 			// Reset to asap if the interval is shorter than the previous
 			// experienced delay.
-			if(ch->cmd.interval == 0xffffffff)
+			if(ch->cmd.cinterval == 0xffffffff)
 				ch->interval = RTAPI_INT64_MAX;
-			else if((ch->interval += ch->cmd.interval * 1000) < 0)
+			else if((ch->interval += ch->cmd.cinterval * 1000) < 0)
 				ch->interval = -1;
 
 			if((r = build_data_frame(inst)) < 0) {
@@ -825,7 +827,9 @@ retry_next_init:
 		// Single cycle delay to allow for queued flush
 		// This should give enough time for the Tx to become busy and maybe
 		// even done again.
+#ifdef DEBUG_STATE
 		MSG_DBG("WAIT_FOR_SEND_BEGIN txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
+#endif
 		set_state(inst, STATE_WAIT_FOR_SEND_COMPLETE);
 		break;
 
@@ -886,8 +890,10 @@ wait_for_data_frame:
 	case STATE_FETCH_DATA:
 	case STATE_FETCH_MORE_DATA:
 fetch_more_data:
+#ifdef DEBUG_STATE
 		MSG_DBG("FETCH_(MORE_)DATA Index %u Frames 0x%04x 0x%04x 0x%04x 0x%04x\n",
 			inst->frameidx, inst->fsizes[0], inst->fsizes[1], inst->fsizes[2], inst->fsizes[3]);
+#endif
 		frsize = inst->fsizes[inst->frameidx];
 		if(frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
 			const char *eor = (frsize & HM2_PKTUART_RCR_ERROROVERRUN)  ? " OVERRUN"  : "";
@@ -925,7 +931,9 @@ fetch_more_data:
 		break;
 
 	case STATE_HANDLE_DATA:
+#ifdef DEBUG_STATE
 		MSG_DBG("HANDLE_DATA\n");
+#endif
 		if(!inst->ignoredata)
 			parse_data_frame(inst);
 		if(inst->frameidx < 16-1 && HM2_PKTUART_RCR_NBYTES_VAL(inst->fsizes[++(inst->frameidx)]) > 0) {
@@ -1266,7 +1274,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 	mb_types64_u val64;
 	unsigned regpos = 0;
 
-	MSG_DBG("Building PDU 0x%02x 0x%04x start pin %i\n", ch->cmd.func, ch->cmd.addr, p);
+	MSG_DBG("Building PDU cmd=%u 0x%02x 0x%04x start pin %i\n", inst->cmdidx, ch->cmd.func, ch->cmd.caddr, p);
 
 	if((r = ch_init(ch)) < 0) {
 		MSG_ERR("%s: error: Failed to initialize frame, command %d\n", inst->name, inst->cmdidx);
@@ -1277,23 +1285,23 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 	case MBCMD_R_COILS: // Read coils
 	case MBCMD_R_INPUTS: // Read discrete inputs
 		r += 1; // trigger a read PDU every time
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
-		CHK_RV(ch_append16(ch, ch->cmd.pincnt));
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
+		CHK_RV(ch_append16(ch, ch->cmd.cpincnt));
 		break;
 	case MBCMD_R_REGISTERS: // Read holding registers
 	case MBCMD_R_INPUTREGS: // Read input registers
 		r += 1; // trigger a read PDU every time
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
 		// Compound values are one, two or four registers large
-		CHK_RV(ch_append16(ch, ch->cmd.regcnt));
+		CHK_RV(ch_append16(ch, ch->cmd.cregcnt));
 		break;
 	case MBCMD_W_COIL: // Write single coil
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
 		CHK_RV(ch_append16(ch, hal->pins[p]->b ? 0xFF00 : 0x0000));
 		break;
 	case MBCMD_W_REGISTER: // Write single register
 		// The target mtype can only be MBT_AB or MBT_BA (single reg write)
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
 		switch(ch->typeptr[0].htype) {
 		case HAL_BIT:
 			map_u(ch, hal->pins[p]->b ? 1 : 0, 0);
@@ -1366,24 +1374,24 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		}
 		break;
 	case MBCMD_W_COILS: // Write multiple coils
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
-		CHK_RV(ch_append16(ch, ch->cmd.pincnt));
-		CHK_RV(ch_append8(ch, (ch->cmd.pincnt + 7) / 8));
-		for(unsigned i = 0; i < ch->cmd.pincnt; i++) {
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
+		CHK_RV(ch_append16(ch, ch->cmd.cpincnt));
+		CHK_RV(ch_append8(ch, (ch->cmd.cpincnt + 7) / 8));
+		for(unsigned i = 0; i < ch->cmd.cpincnt; i++) {
 			if(hal->pins[p++]->b)
 				acc |= 1u << (i % 8);
-			if((i % 8) == 7 || i == ch->cmd.pincnt - 1u) { // time for the next byte
+			if((i % 8) == 7 || i == ch->cmd.cpincnt - 1u) { // time for the next byte
 				CHK_RV(ch_append8(ch, acc));
 				acc = 0;
 			}
 		}
 		break;
 	case MBCMD_W_REGISTERS: // write multiple holding registers
-		CHK_RV(ch_append16(ch, ch->cmd.addr));
+		CHK_RV(ch_append16(ch, ch->cmd.caddr));
 		// Compound values are one, two or four registers large
-		CHK_RV(ch_append16(ch, ch->cmd.regcnt));
-		CHK_RV(ch_append8(ch,  ch->cmd.regcnt * 2));
-		for(unsigned i = 0; i < ch->cmd.pincnt; i++) {
+		CHK_RV(ch_append16(ch, ch->cmd.cregcnt));
+		CHK_RV(ch_append8(ch,  ch->cmd.cregcnt * 2));
+		for(unsigned i = 0; i < ch->cmd.cpincnt; i++) {
 			// Stuff empty space with zeros.
 			// The device must allow writes at the address(es).
 			while(regpos != ch->typeptr[i].regofs) {
@@ -1634,7 +1642,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		return -1;
 	}
 
-	MSG_DBG("Return PDU is");
+	MSG_DBG("Return PDU cmd=%u is", inst->cmdidx);
 	for(unsigned i = 0; i < rxcount; i++) {
 		bytes[i] = (data[w] >> b) & 0xFF;
 		MSG_DBG(" %02x", bytes[i]);
@@ -1679,7 +1687,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		}
 		w = 3;	// First data return byte {mbid, func, bytecount, ...}
 		b = 0;
-		for(unsigned i = 0; i < ch->cmd.pincnt; i++) {
+		for(unsigned i = 0; i < ch->cmd.cpincnt; i++) {
 			hal->pins[p++]->b = !!(bytes[w] & (1u << b));
 			if(++b >= 8) { b = 0; w++; }
 		}
@@ -1688,15 +1696,15 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 	case MBCMD_R_REGISTERS: // read holding registers
 		// A set of data combination can be read. We know how many registers
 		// should be returned.
-		if(bytes[2] != ch->cmd.regcnt * 2) {
+		if(bytes[2] != ch->cmd.cregcnt * 2) {
 			MSG_ERR("%s: error: Cmd response data length %u was expected to be %u\n",
-					inst->name, (unsigned)bytes[2], ch->cmd.regcnt * 2);
+					inst->name, (unsigned)bytes[2], ch->cmd.cregcnt * 2);
 			set_error(inst, ERANGE);
 			force_resend(inst);
 			break;
 		}
 
-		for(int i = 0; i < ch->cmd.pincnt; i++) {
+		for(int i = 0; i < ch->cmd.cpincnt; i++) {
 			unsigned pos = 3 + ch->typeptr[i].regofs * 2;
 			// 'pos' is offset in bytes[] array.
 			// The 3 are the fields mbid, func and bytecount
@@ -2182,55 +2190,55 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 
 	// Check all init data packets
 	for(unsigned i = 0; i < ninit; i++) {
-		initptr[i].flags   = be16_to_cpu(initptr[i].flags);
-		initptr[i].addr    = be16_to_cpu(initptr[i].addr);
-		initptr[i].pincnt  = be16_to_cpu(initptr[i].pincnt);
-		initptr[i].regcnt  = be16_to_cpu(initptr[i].regcnt);
-		initptr[i].unusedp1= be16_to_cpu(initptr[i].unusedp1);
-		initptr[i].unusedp2= be32_to_cpu(initptr[i].unusedp2);
-		initptr[i].typeptr = be32_to_cpu(initptr[i].typeptr);
-		initptr[i].interval= be32_to_cpu(initptr[i].interval);
-		initptr[i].timeout = be32_to_cpu(initptr[i].timeout);
-		initptr[i].dataptr = be32_to_cpu(initptr[i].dataptr);
+		initptr[i].flags    = be16_to_cpu(initptr[i].flags);
+		initptr[i].caddr    = be16_to_cpu(initptr[i].caddr);
+		initptr[i].cpincnt  = be16_to_cpu(initptr[i].cpincnt);
+		initptr[i].cregcnt  = be16_to_cpu(initptr[i].cregcnt);
+		initptr[i].unusedp1 = be16_to_cpu(initptr[i].unusedp1);
+		initptr[i].unusedp2 = be32_to_cpu(initptr[i].unusedp2);
+		initptr[i].ctypeptr = be32_to_cpu(initptr[i].ctypeptr);
+		initptr[i].cinterval= be32_to_cpu(initptr[i].cinterval);
+		initptr[i].ctimeout = be32_to_cpu(initptr[i].ctimeout);
+		initptr[i].cdataptr = be32_to_cpu(initptr[i].cdataptr);
 
-		if(!initptr[i].func && initptr[i].addr > 1) {
-			MSG_ERR("%s: error: Mbccb init %u unknown meta-command %u\n", inst->name, i, initptr[i].addr);
+		if(!initptr[i].func && initptr[i].caddr > 1) {
+			MSG_ERR("%s: error: Mbccb init %u unknown meta-command %u\n", inst->name, i, initptr[i].caddr);
 			goto errout;
 		}
 
 		// Flags
-		if(initptr[i].flags & ~MBCCB_CMDF_MASK) {
-			MSG_WARN("%s: warning: Mbccb init %u has extra flags set (flags=0x%04x, allowed=0x%04x)\n",
-						inst->name, i, initptr[i].flags, MBCCB_CMDF_MASK);
-		}
-		initptr[i].flags &= MBCCB_CMDF_MASK;
 		if(initptr[i].flags & ~MBCCB_CMDF_INITMASK) {
 			MSG_ERR("%s: error: Mbccb init %u has invalid flags set (flags=0x%04x, allowed=0x%04x)\n",
 						inst->name, i, initptr[i].flags, MBCCB_CMDF_INITMASK);
 			goto errout;
 		}
 
-		const rtapi_u8 *dp = dataptr + initptr[i].dataptr;
-		if(initptr[i].dataptr >= mbccb->datalen) {
+		const rtapi_u8 *dp = dataptr + initptr[i].cdataptr;
+		if(initptr[i].cdataptr >= mbccb->datalen) {
 			MSG_ERR("%s: error: Mbccb init %u data size mismatch. Read %u is beyond segment size %u\n",
-						inst->name, i, initptr[i].dataptr, mbccb->datalen);
+						inst->name, i, initptr[i].cdataptr, mbccb->datalen);
 			goto errout;
 		}
 
-		// Check init's data length
-		// Length must be larger or equal smallest packet and it must be within
-		// the file boundary.
-		if(dp + *dp >= dataptrend) {
-			MSG_ERR("%s: error: Mbccb init %u data outside data segment\n", inst->name, i);
-			goto errout;
-		}
-		if(*dp < 6) {	// Packet: mbid(1), func(1), addr(2), value_or_count(2), ...
-			MSG_ERR("%s: error: Mbccb init %u data packet size less than 6\n", inst->name, i);
+		if(initptr[i].cdataptr) {
+			// Check init's data length
+			// Length must be larger or equal smallest packet and it must be within
+			// the file boundary.
+			if(dp + *dp >= dataptrend) {
+				MSG_ERR("%s: error: Mbccb init %u data outside data segment\n", inst->name, i);
+				goto errout;
+			}
+			if(*dp < 6) {	// Packet: mbid(1), func(1), addr(2), value_or_count(2), ...
+				MSG_ERR("%s: error: Mbccb init %u data packet size less than 6\n", inst->name, i);
+				goto errout;
+			}
+		} else if(initptr[i].func || initptr[i].caddr > 1) {
+			MSG_ERR("%s: error: Mbccb init %u has no data packet and invalid meta-command\n", inst->name, i);
 			goto errout;
 		}
 
 		// Can never be more than MAXDELAY
-		if(initptr[i].timeout > MAXDELAY) {
+		if(initptr[i].ctimeout > MAXDELAY) {
 			MSG_ERR("%s: error: Mbccb init %u timeout larger than %u microseconds\n", inst->name, i, (unsigned)MAXDELAY);
 			goto errout;
 		}
@@ -2262,35 +2270,35 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 
 	// Check that all pins names are valid and in bounds
 	for(unsigned c = 0; c < ncmds; c++) {
-		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].flags);
-		cmdsptr[c].addr    = be16_to_cpu(cmdsptr[c].addr);
-		cmdsptr[c].pincnt  = be16_to_cpu(cmdsptr[c].pincnt);
-		cmdsptr[c].regcnt  = be16_to_cpu(cmdsptr[c].regcnt);
-		cmdsptr[c].unusedp1= be16_to_cpu(cmdsptr[c].unusedp1);
-		cmdsptr[c].unusedp2= be32_to_cpu(cmdsptr[c].unusedp2);
-		cmdsptr[c].typeptr = be32_to_cpu(cmdsptr[c].typeptr);
-		cmdsptr[c].interval= be32_to_cpu(cmdsptr[c].interval);
-		cmdsptr[c].timeout = be32_to_cpu(cmdsptr[c].timeout);
-		cmdsptr[c].dataptr = be32_to_cpu(cmdsptr[c].dataptr);
+		cmdsptr[c].flags    = be16_to_cpu(cmdsptr[c].flags);
+		cmdsptr[c].caddr    = be16_to_cpu(cmdsptr[c].caddr);
+		cmdsptr[c].cpincnt  = be16_to_cpu(cmdsptr[c].cpincnt);
+		cmdsptr[c].cregcnt  = be16_to_cpu(cmdsptr[c].cregcnt);
+		cmdsptr[c].unusedp1 = be16_to_cpu(cmdsptr[c].unusedp1);
+		cmdsptr[c].unusedp2 = be32_to_cpu(cmdsptr[c].unusedp2);
+		cmdsptr[c].ctypeptr = be32_to_cpu(cmdsptr[c].ctypeptr);
+		cmdsptr[c].cinterval= be32_to_cpu(cmdsptr[c].cinterval);
+		cmdsptr[c].ctimeout = be32_to_cpu(cmdsptr[c].ctimeout);
+		cmdsptr[c].cdataptr = be32_to_cpu(cmdsptr[c].cdataptr);
 
 		// Data pointer can never be beyond data segment
-		if(cmdsptr[c].dataptr >= mbccb->datalen) {
+		if(cmdsptr[c].cdataptr >= mbccb->datalen) {
 			MSG_ERR("%s: error: Mbccb cmds %u cmds' datasize mismatch. Read %u is beyond segment size %u\n",
-						inst->name, c, cmdsptr[c].dataptr, mbccb->datalen);
+						inst->name, c, cmdsptr[c].cdataptr, mbccb->datalen);
 			goto errout;
 		}
 
 		// Type pointer can never be beyond data segment
-		if(cmdsptr[c].typeptr >= mbccb->datalen) {
+		if(cmdsptr[c].ctypeptr >= mbccb->datalen) {
 			MSG_ERR("%s: error: Mbccb cmds %u types' datasize mismatch. Read %u is beyond segment size %u\n",
-						inst->name, c, cmdsptr[c].typeptr, mbccb->datalen);
+						inst->name, c, cmdsptr[c].ctypeptr, mbccb->datalen);
 			goto errout;
 		}
 
 		// Type pointer /content/ must be % 4 aligned
-		if(cmdsptr[c].typeptr && 0 != (cmdsptr[c].typeptr + 1) % 4) {
+		if(cmdsptr[c].ctypeptr && 0 != (cmdsptr[c].ctypeptr + 1) % 4) {
 			MSG_ERR("%s: error: Mbccb cmds %u types' data alignment mismatch %u %% 4 != 0\n",
-						inst->name, c, cmdsptr[c].typeptr + 1);
+						inst->name, c, cmdsptr[c].ctypeptr + 1);
 			goto errout;
 		}
 
@@ -2302,7 +2310,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		cmdsptr[c].flags &= MBCCB_CMDF_MASK;
 
 		// Can never be more than MAXDELAY
-		if(cmdsptr[c].timeout > MAXDELAY) {
+		if(cmdsptr[c].ctimeout > MAXDELAY) {
 			MSG_ERR("%s: error: Mbccb cmds %u timeout larger than %u microseconds\n", inst->name, c, (unsigned)MAXDELAY);
 			goto errout;
 		}
@@ -2314,7 +2322,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		// Support a strict set of command functions with type restrictions
 		switch(cmdsptr[c].func) {
 		case 0: // The delay command
-			if(cmdsptr[c].mbid || cmdsptr[c].pincnt || cmdsptr[c].addr) {
+			if(cmdsptr[c].mbid || cmdsptr[c].cpincnt || cmdsptr[c].caddr) {
 				MSG_ERR("%s: error: Mbccb cmds %u mbid, pin count or address not zero for delay command\n", inst->name, c);
 				goto errout;
 			}
@@ -2323,9 +2331,9 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		case MBCMD_W_COILS:
 		case MBCMD_W_COIL:
 		case MBCMD_R_INPUTS:
-			if(cmdsptr[c].pincnt < 1 || cmdsptr[c].pincnt > 2000) {
+			if(cmdsptr[c].cpincnt < 1 || cmdsptr[c].cpincnt > 2000) {
 				MSG_ERR("%s: error: Mbccb cmds %u bit function %u with invalid %u pins\n",
-						inst->name, c, cmdsptr[c].func, cmdsptr[c].pincnt);
+						inst->name, c, cmdsptr[c].func, cmdsptr[c].cpincnt);
 				goto errout;
 			}
 			// These are implicit HAL_BIT
@@ -2336,31 +2344,31 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		case MBCMD_W_REGISTER:
 			// For these functions any type <=> any type is allowed
 			// except W_REGISTER requiring word size
-			if(!cmdsptr[c].typeptr) {
+			if(!cmdsptr[c].ctypeptr) {
 				MSG_ERR("%s: error: Mbccb cmds %u missing type info, typeptr is zero\n",
 							inst->name, c);
 				goto errout;
 			}
 
-			xtypelen = *(dataptr + cmdsptr[c].typeptr);
-			xtype    = (hm2_modbus_mbccb_type_t *)(dataptr + cmdsptr[c].typeptr + 1);
+			xtypelen = *(dataptr + cmdsptr[c].ctypeptr);
+			xtype    = (hm2_modbus_mbccb_type_t *)(dataptr + cmdsptr[c].ctypeptr + 1);
 			if(xtypelen % sizeof(*xtype)) {
 				MSG_ERR("%s: error: Mbccb cmds %u has invalid types modulo length (%u %% %zu != 0)\n",
 						inst->name, c, xtypelen, sizeof(*xtype));
 				goto errout;
 			}
-			if(xtypelen / sizeof(*xtype) != cmdsptr[c].pincnt) {
+			if(xtypelen / sizeof(*xtype) != cmdsptr[c].cpincnt) {
 				MSG_ERR("%s: error: Mbccb cmds %u has %zu types with %u pins\n",
-						inst->name, c, xtypelen / sizeof(*xtype), cmdsptr[c].pincnt);
+						inst->name, c, xtypelen / sizeof(*xtype), cmdsptr[c].cpincnt);
 				goto errout;
 			}
 			if(cmdsptr[c].func == MBCMD_W_REGISTER) {
-				if(cmdsptr[c].pincnt != 1) {
-					MSG_ERR("%s: error: Mbccb cmds %u has pin count %u != 1\n", inst->name, c, cmdsptr[c].pincnt);
+				if(cmdsptr[c].cpincnt != 1) {
+					MSG_ERR("%s: error: Mbccb cmds %u has pin count %u != 1\n", inst->name, c, cmdsptr[c].cpincnt);
 					goto errout;
 				}
-				if(cmdsptr[c].regcnt != 1) {
-					MSG_ERR("%s: error: Mbccb cmds %u has register count %u != 1\n", inst->name, c, cmdsptr[c].regcnt);
+				if(cmdsptr[c].cregcnt != 1) {
+					MSG_ERR("%s: error: Mbccb cmds %u has register count %u != 1\n", inst->name, c, cmdsptr[c].cregcnt);
 					goto errout;
 				}
 				if(mtypesize(xtype->mtype) != 1) { // One word
@@ -2368,12 +2376,12 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 					goto errout;
 				}
 			} else {
-				if(cmdsptr[c].pincnt < 1 || cmdsptr[c].pincnt > 125) {
-					MSG_ERR("%s: error: Mbccb cmds %u has pin count %u out of range [1..125]\n", inst->name, c, cmdsptr[c].pincnt);
+				if(cmdsptr[c].cpincnt < 1 || cmdsptr[c].cpincnt > 125) {
+					MSG_ERR("%s: error: Mbccb cmds %u has pin count %u out of range [1..125]\n", inst->name, c, cmdsptr[c].cpincnt);
 					goto errout;
 				}
-				if(cmdsptr[c].regcnt < 1 || cmdsptr[c].regcnt > 125) {
-					MSG_ERR("%s: error: Mbccb cmds %u has register count %u out of range [1..125]\n", inst->name, c, cmdsptr[c].regcnt);
+				if(cmdsptr[c].cregcnt < 1 || cmdsptr[c].cregcnt > 125) {
+					MSG_ERR("%s: error: Mbccb cmds %u has register count %u out of range [1..125]\n", inst->name, c, cmdsptr[c].cregcnt);
 					goto errout;
 				}
 			}
@@ -2383,7 +2391,7 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 				goto errout;
 			}
 			xregofs = 0;
-			for(unsigned x = 0; x < cmdsptr[c].pincnt; x++) {
+			for(unsigned x = 0; x < cmdsptr[c].cpincnt; x++) {
 				if(!mtypeisvalid(xtype[x].mtype)) {
 					MSG_ERR("%s: error: Mbccb cmds %u, pin %u has invalid modbustype %u\n", inst->name, c, x, xtype[x].mtype);
 					goto errout;
@@ -2421,8 +2429,8 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 		// Check each pin
 		// Strings are pascal strings with 'leading byte == length' and must
 		// additionally be NUL terminated. The NUL is counted in the length.
-		const rtapi_u8 *dp = dataptr + cmdsptr[c].dataptr;
-		for(unsigned p = 0; p < cmdsptr[c].pincnt; p++) {
+		const rtapi_u8 *dp = dataptr + cmdsptr[c].cdataptr;
+		for(unsigned p = 0; p < cmdsptr[c].cpincnt; p++) {
 			if(dp + *dp >= dataptrend) {
 				MSG_ERR("%s: error: Mbccb pin %u:%u outside data segment\n", inst->name, c, p);
 				goto errout;
@@ -2605,8 +2613,8 @@ int rtapi_app_main(void)
 		// Copy the loop command control structure data
 		for(unsigned i = 0; i < inst->ncmds; i++) {
 			inst->_cmds[i].cmd = inst->cmdsptr[i];
-			if(inst->cmdsptr[i].typeptr)
-				inst->_cmds[i].typeptr = (hm2_modbus_mbccb_type_t *)(inst->dataptr + inst->cmdsptr[i].typeptr + 1);
+			if(inst->cmdsptr[i].ctypeptr)
+				inst->_cmds[i].typeptr = (hm2_modbus_mbccb_type_t *)(inst->dataptr + inst->cmdsptr[i].ctypeptr + 1);
 		}
 
 		// Setup to start sending init or command packets
@@ -2750,9 +2758,9 @@ int rtapi_app_main(void)
 			// Now create the pins associated with the command
 			hm2_modbus_cmd_t *cmd = &inst->_cmds[c];
 			int dir = HAL_IN;
-			const rtapi_u8 *dptr = inst->dataptr + cmd->cmd.dataptr;
+			const rtapi_u8 *dptr = inst->dataptr + cmd->cmd.cdataptr;
 			cmd->pinref = p;
-			for(int j = 0; j < cmd->cmd.pincnt; j++) {
+			for(int j = 0; j < cmd->cmd.cpincnt; j++) {
 				switch(cmd->cmd.func) {
 				case MBCMD_R_COILS:
 				case MBCMD_R_INPUTS:
