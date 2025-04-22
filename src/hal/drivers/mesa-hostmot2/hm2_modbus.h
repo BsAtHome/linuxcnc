@@ -50,30 +50,30 @@ typedef struct {
 typedef struct {
 	rtapi_u8	mbid;	// Modbus device ID
 	rtapi_u8	func;	// Function code, 0 for init
-	rtapi_u16	flags;		// Mostly quirks to handle, see MBCCB_CMDF_* defines
+	rtapi_u16	flags;	// Mostly quirks to handle, see MBCCB_CMDF_* defines
 	union {
 		struct {	// Command fields
-			rtapi_u16	addr;		// Address
-			rtapi_u16	pincnt;		// Number of pins
-			rtapi_u16	regcnt;		// Number of registers
+			rtapi_u16	caddr;		// Address
+			rtapi_u16	cpincnt;		// Number of pins
+			rtapi_u16	cregcnt;		// Number of registers
 			rtapi_u16	unusedp1;	// cmds 0 (drvdly)
 			rtapi_u32	unusedp2;	// cmds 0 (icdelay)
-			rtapi_u32	typeptr;	// Type and address offset list
-			rtapi_u32	interval;	// The interval to repeat this command
-			rtapi_u32	timeout;	// Response timeout or delay in microseconds
+			rtapi_u32	ctypeptr;	// Type and address offset list
+			rtapi_u32	cinterval;	// The interval to repeat this command
+			rtapi_u32	ctimeout;	// Response timeout or delay in microseconds
 		};
 		struct {	// Init fields
-			rtapi_u16	metacmd;	// Meta command
-			rtapi_u16	rxdelay;	// init comm change
-			rtapi_u16	txdelay;	// init comm change
-			rtapi_u16	drvdelay;	// init comm change
-			rtapi_u32	icdelay;	// init comm change (unusedp1)
+			rtapi_u16	imetacmd;	// Meta command
+			rtapi_u16	irxdelay;	// init comm change
+			rtapi_u16	itxdelay;	// init comm change
+			rtapi_u16	idrvdelay;	// init comm change
+			rtapi_u32	iicdelay;	// init comm change (unusedp1)
 			rtapi_u32	unusedi1;	// init 0 (typeptr)
 			rtapi_u32	unusedi2;	// init 0 (interval)
-			rtapi_u32	baudrate;	// init comm change
+			rtapi_u32	ibaudrate;	// init comm change
 		};
 	};
-	rtapi_u32	dataptr; // Pin names, packet data for init
+	rtapi_u32	cdataptr; // Pin names, packet data for init
 } hm2_modbus_mbccb_cmds_t;
 
 #define MBCCB_PINF_SCALE	0x0001	// Add scale/offset pins
