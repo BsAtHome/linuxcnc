@@ -49,7 +49,7 @@ static inline rtapi_u16 be16_to_cpu(rtapi_u16 v) { return be16toh(v); }
 #endif
 
 // Define to compile in debug messages
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
 //#define DEBUG_STATE
 #endif
@@ -203,9 +203,9 @@ typedef struct {
 	hal_u32_t parity;	// RO
 	hal_u32_t stopbits;	// RO
 	hal_u32_t icdelay;	// RO Inter character delay
-	hal_u32_t txdelay;	// RW Inter frame delay for packets sent
-	hal_u32_t rxdelay;	// RW Inter frame delay for packet end detection in receive
-	hal_u32_t drvdelay;	// RW Delay before sending data (in bit times)
+	hal_u32_t txdelay;	// RO Inter frame delay for packets sent
+	hal_u32_t rxdelay;	// RO Inter frame delay for packet end detection in receive
+	hal_u32_t drvdelay;	// RO Delay before sending data (in bit times)
 } hm2_modbus_hal_t;
 
 // The command structure and data buffer.
@@ -313,40 +313,111 @@ RTAPI_MP_INT(debug, "Set message level for debugging purpose [0...5] where 0=non
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-//
-// Note on do_setup():
-// It will bypass the queue commands and send changes immediately. This may be
-// detrimental to consistency, so it should not be used lightly when running in
-// the normal loop.
-// Returns zero (0) is no change is required. Positive one (1) is returned if a
-// configuration change was performed. A negative errno is returned on error.
-//
-static int do_setup(hm2_modbus_inst_t *inst, int queue)
+static unsigned calc_icdelay(unsigned baudrate, unsigned parity, unsigned stopbits, unsigned icdelay)
 {
-	int r;
-	unsigned v, xmax;
+	if(icdelay) {
+		return icdelay;	// Manual setup
+	} else if(baudrate <= 19200) {
+		unsigned bits = 8 + (parity ? 1 : 0) + stopbits;
+		return (15 * bits + 14) / 10;	// 1.5 char delay
+	}
+	// Faster than 19k2
+	unsigned bits = (75 * baudrate + 99999) / 100000;	// 750 us
+	return bits > 0xff ? 0xff : bits;
+}
 
-	if    (inst->cfg_tx.ifdelay    == inst->hal->txdelay
-		&& inst->cfg_rx.ifdelay    == inst->hal->rxdelay
-		&& inst->cfg_tx.drivedelay == inst->hal->drvdelay) return 0;
+//
+// A V3+ RX has inter-character delay measurement
+// t1.5: see section 2.5.5.1
+// of "MODBUS over serial line specification and implementation guide V1.02"
+//
+static void setup_icdelay(hm2_modbus_inst_t *inst, unsigned baudrate, unsigned parity, unsigned stopbits, unsigned icdelay)
+{
+	if(inst->rxversion >= 3) {
+		inst->maxicharbits = calc_icdelay(baudrate, parity, stopbits, icdelay);
+	} else {
+		inst->maxicharbits = 0;
+	}
+	inst->hal->icdelay = inst->maxicharbits;
+}
 
-	xmax = inst->txversion < 3 ? 0xff : 0x3fc;
-	if((v = inst->hal->txdelay) > xmax) inst->hal->txdelay = v = xmax;
-	inst->cfg_tx.ifdelay = v;
-
-	xmax = inst->rxversion < 3 ? 0xff : 0x3fc;
-	if((v = inst->hal->rxdelay) > xmax) inst->hal->rxdelay = v = xmax;
-	inst->cfg_rx.ifdelay = v;
-
-	if((v = inst->hal->drvdelay) > 0x1f) inst->hal->drvdelay = v = 0x1f;
-	inst->cfg_tx.drivedelay = v;
-
-	if((r = hm2_pktuart_config(inst->uart, &inst->cfg_rx, &inst->cfg_tx, queue)) < 0) {
-		MSG_ERR("%s: error: PktUART setup problem: error=%d\n", inst->name, r);
-		return r;
+//
+// Calculate the inter-frame delay time:
+// - 3.5 chars if baudrate <= 19200
+// - 1750 microseconds if baudrate > 19200
+//
+static unsigned calc_ifdelay(hm2_modbus_inst_t *inst, unsigned baudrate, unsigned parity, unsigned stopbits)
+{
+	if(baudrate > 582000) {
+		MSG_WARN("%s: warning: Baudrate > 582000 will make inter-frame timer overflow. Setting to maximum.\n", inst->name);
+		return 1020;
 	}
 
-	return 1;
+	// calculation works for baudrates less than ~24 Mbit/s
+	if(baudrate <= 19200)
+		return (175u * baudrate + 99999u) / 100000u;
+	unsigned bits = 1 + 8 + (parity ? 1 : 0) + (stopbits > 1 ? 2 : 1);
+	return (bits * 35 + 9) / 10;	// Bit-times * 3.5 rounded up
+}
+
+//
+// Send a communication parameter change
+//
+static int send_comms_change(hm2_modbus_inst_t *inst, hm2_modbus_cmd_t *ch)
+{
+	int r;
+	unsigned baudrate = ch->cmd.baudrate;
+
+	// Set new baudrate
+	inst->cfg_rx.baudrate = inst->cfg_tx.baudrate = baudrate;
+
+	// Clear out previous flags
+	inst->cfg_rx.flags &= ~(HM2_PKTUART_CONFIG_PARITYEN | HM2_PKTUART_CONFIG_PARITYODD | HM2_PKTUART_CONFIG_STOPBITS2);
+	inst->cfg_tx.flags &= ~(HM2_PKTUART_CONFIG_PARITYEN | HM2_PKTUART_CONFIG_PARITYODD | HM2_PKTUART_CONFIG_STOPBITS2);
+	// Set the new flags
+	unsigned parity = 0;
+	if(ch->cmd.flags & MBCCB_CMDF_PARITYEN) {
+		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
+		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYEN;
+		parity |= 2;
+	}
+	if(ch->cmd.flags & MBCCB_CMDF_PARITYODD) {
+		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
+		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_PARITYODD;
+		parity |= 1;
+	}
+	unsigned stopbits = 1;
+	if(ch->cmd.flags & MBCCB_CMDF_STOPBITS2) {
+		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
+		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_STOPBITS2;
+		stopbits = 2;
+	}
+
+	// Re-examine the delay parameters
+	if(ch->cmd.rxdelay)
+		inst->cfg_rx.ifdelay = ch->cmd.rxdelay;
+	else
+		inst->cfg_rx.ifdelay = calc_ifdelay(inst, baudrate, parity, stopbits) - 1;
+	if(ch->cmd.txdelay)
+		inst->cfg_tx.ifdelay = ch->cmd.txdelay;
+	else
+		inst->cfg_tx.ifdelay = calc_ifdelay(inst, baudrate, parity, stopbits) + 1;
+
+	// Expose to HAL
+	inst->hal->baudrate = baudrate;
+	inst->hal->parity   = parity;
+	inst->hal->stopbits = stopbits;
+	inst->hal->rxdelay  = inst->cfg_rx.ifdelay;
+	inst->hal->txdelay  = inst->cfg_tx.ifdelay;
+	inst->hal->drvdelay = inst->cfg_tx.drivedelay;
+	// Redo the inter-character delay settings
+	setup_icdelay(inst, baudrate, parity, stopbits, ch->cmd.icdelay);
+
+	// Queue a comms change
+	if((r = hm2_pktuart_config(inst->uart, &inst->cfg_rx, &inst->cfg_tx, 1)) < 0) {
+		MSG_ERR("%s: error: PktUART setup problem: error=%d\n", inst->name, r);
+	}
+	return r;
 }
 
 static void set_error(hm2_modbus_inst_t *inst, int errcode)
@@ -601,9 +672,18 @@ static void process(void *arg, long period)
 retry_next_init:
 			hm2_modbus_cmd_t *ch = &inst->cmds[inst->cmdidx];
 			if(0 == ch->cmd.func) {
-				// This is a delay command
-				// The timeout will be set in set_state()
-				set_state(inst, STATE_WAIT_FOR_TIMEOUT);
+				// Special meta command
+				if(0 == ch->cmd.metacmd) {			// This is a delay command
+					// The timeout will be set in set_state()
+					set_state(inst, STATE_WAIT_FOR_TIMEOUT);
+				} else if(1 == ch->cmd.metacmd) {	// This is a comms change
+					send_comms_change(inst, ch);
+					next_command(inst);	// Advance because we stay in STATE_START
+				} else {
+					MSG_ERR("%s: error: init command %u uses unknown meta-command %u\n", inst->name, inst->cmdidx, ch->cmd.metacmd);
+					next_command(inst);
+				}
+				break;	// Meta commands will always need the next round
 			} else {
 				const rtapi_u8 *dptr = inst->dataptr + ch->cmd.dataptr;
 				memcpy(ch->data, dptr + 1, *dptr);	// Packet is prepared as data
@@ -626,7 +706,7 @@ retry_next_init:
 					set_state(inst, STATE_WAIT_FOR_SEND_BEGIN);
 				}
 			}
-			break;
+			break;	// Init command sent
 		}
 
 		// Handling normal commands loop
@@ -644,23 +724,6 @@ retry_next_init:
 					break;
 				}
 			}
-		}
-
-		// See if the comms params have changed and if so, change them (queued).
-		if((r = do_setup(inst, 1)) < 0) {
-			// If queueing a new setup errors then we are in deep trouble...
-			// Most likely, everything else will fail too.
-			MSG_DBG("Failed port setup (%d), resetting\n", r);
-			queue_reset(inst);
-			// Tampering with the txdelay ensures we really try to setup again
-			// in the next round because the "current" txdelay is not what the
-			// hal param says it should be.
-			inst->cfg_tx.ifdelay ^= 0x55;
-			break;
-		}
-		if(r > 0) {
-			// The setup changed, wait one period to flush
-			break;
 		}
 
 		// No incoming data, we are free to send.
@@ -2119,17 +2182,19 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 
 	// Check all init data packets
 	for(unsigned i = 0; i < ninit; i++) {
+		initptr[i].flags   = be16_to_cpu(initptr[i].flags);
 		initptr[i].addr    = be16_to_cpu(initptr[i].addr);
 		initptr[i].pincnt  = be16_to_cpu(initptr[i].pincnt);
-		initptr[i].flags   = be16_to_cpu(initptr[i].flags);
 		initptr[i].regcnt  = be16_to_cpu(initptr[i].regcnt);
+		initptr[i].unusedp1= be16_to_cpu(initptr[i].unusedp1);
+		initptr[i].unusedp2= be32_to_cpu(initptr[i].unusedp2);
 		initptr[i].typeptr = be32_to_cpu(initptr[i].typeptr);
 		initptr[i].interval= be32_to_cpu(initptr[i].interval);
 		initptr[i].timeout = be32_to_cpu(initptr[i].timeout);
 		initptr[i].dataptr = be32_to_cpu(initptr[i].dataptr);
 
-		if(initptr[i].pincnt || initptr[i].regcnt || initptr[i].typeptr || initptr[i].interval) {
-			MSG_ERR("%s: error: Mbccb init %u zero fields are not zero\n", inst->name, i);
+		if(!initptr[i].func && initptr[i].addr > 1) {
+			MSG_ERR("%s: error: Mbccb init %u unknown meta-command %u\n", inst->name, i, initptr[i].addr);
 			goto errout;
 		}
 
@@ -2197,10 +2262,12 @@ static int load_mbccb(hm2_modbus_inst_t *inst, const char *fname)
 
 	// Check that all pins names are valid and in bounds
 	for(unsigned c = 0; c < ncmds; c++) {
+		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].flags);
 		cmdsptr[c].addr    = be16_to_cpu(cmdsptr[c].addr);
 		cmdsptr[c].pincnt  = be16_to_cpu(cmdsptr[c].pincnt);
-		cmdsptr[c].flags   = be16_to_cpu(cmdsptr[c].flags);
 		cmdsptr[c].regcnt  = be16_to_cpu(cmdsptr[c].regcnt);
+		cmdsptr[c].unusedp1= be16_to_cpu(cmdsptr[c].unusedp1);
+		cmdsptr[c].unusedp2= be32_to_cpu(cmdsptr[c].unusedp2);
 		cmdsptr[c].typeptr = be32_to_cpu(cmdsptr[c].typeptr);
 		cmdsptr[c].interval= be32_to_cpu(cmdsptr[c].interval);
 		cmdsptr[c].timeout = be32_to_cpu(cmdsptr[c].timeout);
@@ -2562,9 +2629,9 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->parity),   comp_id, "%s.parity", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->stopbits), comp_id, "%s.stopbits", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->icdelay),  comp_id, "%s.icdelay", inst->name));
-		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->txdelay),  comp_id, "%s.txdelay", inst->name));
-		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
-		CHECK(hal_param_u32_newf(HAL_RW, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
+		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->txdelay),  comp_id, "%s.txdelay", inst->name));
+		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
+		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
 
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->suspend),   comp_id, "%s.suspend", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->reset),     comp_id, "%s.reset", inst->name));
@@ -2592,10 +2659,15 @@ int rtapi_app_main(void)
 		}
 		inst->hal->parity   = parity;
 		inst->hal->stopbits = stopbits;
-		// The following three will be copied to the instance in do_setup()
-		inst->hal->rxdelay  = inst->mbccb->rxdelay;
-		inst->hal->txdelay  = inst->mbccb->txdelay;
 		inst->hal->drvdelay = inst->mbccb->drvdelay;
+		if(!inst->mbccb->rxdelay)	// Auto
+			inst->hal->rxdelay = inst->cfg_rx.ifdelay = calc_ifdelay(inst, inst->mbccb->baudrate, parity, stopbits) - 1;
+		else	// Manual
+			inst->hal->rxdelay = inst->cfg_rx.ifdelay = inst->mbccb->rxdelay;
+		if(!inst->mbccb->txdelay)	// Auto
+			inst->hal->txdelay = inst->cfg_tx.ifdelay = calc_ifdelay(inst, inst->mbccb->baudrate, parity, stopbits) + 1;
+		else	// Manual
+			inst->hal->txdelay = inst->cfg_tx.ifdelay = inst->mbccb->txdelay;
 
 		inst->cfg_rx.filterrate = 0;	// Zero means 2 times baudrate
 		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXEN;
@@ -2622,15 +2694,15 @@ int rtapi_app_main(void)
 				MSG_WARN("%s: warning: Old PktUART cannot set two stop-bits. Setting to one.\n", inst->name);
 				stopbits = 1;
 			}
-			if(inst->txversion < 3 && inst->mbccb->txdelay > 0xff) {
+			if(inst->txversion < 3 && inst->cfg_tx.ifdelay > 0xff) {
 				MSG_WARN("%s: warning: Old PktUART cannot set txdelay to 0x%04x. Clamping to 0xff.\n",
-						inst->name, inst->mbccb->txdelay);
-				inst->mbccb->txdelay = 0xff;
+						inst->name, inst->cfg_tx.ifdelay);
+				inst->cfg_tx.ifdelay = 0xff;
 			}
-			if(inst->rxversion < 3 && inst->mbccb->rxdelay > 0xff) {
+			if(inst->rxversion < 3 && inst->cfg_rx.ifdelay > 0xff) {
 				MSG_WARN("%s: warning: Old PktUART cannot set rxdelay to 0x%04x. Clamping to 0xff.\n",
-						inst->name, inst->mbccb->rxdelay);
-				inst->mbccb->rxdelay = 0xff;
+						inst->name, inst->cfg_rx.ifdelay);
+				inst->cfg_rx.ifdelay = 0xff;
 			}
 			if(inst->rxversion < 3 && inst->mbccb->icdelay != 0) {
 				MSG_WARN("%s: warning: Old PktUART cannot set icdelay, disabling.\n", inst->name);
@@ -2638,34 +2710,20 @@ int rtapi_app_main(void)
 			}
 		}
 
-		// A V3+ RX has inter-character delay measurement
-		// t1.5: see section 2.5.5.1 of
-		// of "MODBUS over serial line specification and implementation guide V1.02"
-		if(inst->rxversion >= 3) {
-			if(inst->mbccb->icdelay) {
-				inst->maxicharbits = inst->mbccb->icdelay; // Manually set in mbccb
-			} else if(inst->mbccb->baudrate <= 19200) {
-				unsigned bits = 8 + (parity ? 1 : 0) + stopbits;
-				inst->maxicharbits = (15 * bits + 14) / 10;	// 1.5 char delay
-			} else {
-				unsigned bits = (75 * inst->mbccb->baudrate + 99999) / 100000;	// 750 us
-				inst->maxicharbits = bits > 0xff ? 0xff : bits;
-			}
-		} else {
-			inst->maxicharbits = 0;
-		}
-		inst->hal->icdelay = inst->maxicharbits;
+		setup_icdelay(inst, inst->mbccb->baudrate, parity, stopbits, inst->mbccb->icdelay);
 
-		MSG_DBG("%s: inst->name     : %s\n", inst->name, inst->name);
-		MSG_DBG("%s: inst->uart     : %s\n", inst->name, inst->uart);
-		MSG_DBG("%s: inst->mbccbsize: %zd\n", inst->name, inst->mbccbsize);
-		MSG_DBG("%s: inst->ninit    : %u\n", inst->name, inst->ninit);
-		MSG_DBG("%s: inst->ncmds    : %u\n", inst->name, inst->ncmds);
-		MSG_DBG("%s: inst->npins    : %u\n", inst->name, inst->npins);
-		MSG_DBG("%s: inst->icdelay  : %u\n", inst->name, inst->maxicharbits);
-		MSG_DBG("%s: inst->mbccb->txdelay  : %u\n", inst->name, inst->mbccb->txdelay);
-		MSG_DBG("%s: inst->mbccb->rxdelay  : %u\n", inst->name, inst->mbccb->rxdelay);
-		MSG_DBG("%s: inst->mbccb->drvdelay : %u\n", inst->name, inst->mbccb->drvdelay);
+#ifdef DEBUG
+		MSG_INFO("%s: inst->name     : %s\n", inst->name, inst->name);
+		MSG_INFO("%s: inst->uart     : %s\n", inst->name, inst->uart);
+		MSG_INFO("%s: inst->mbccbsize: %zd\n", inst->name, inst->mbccbsize);
+		MSG_INFO("%s: inst->ninit    : %u\n", inst->name, inst->ninit);
+		MSG_INFO("%s: inst->ncmds    : %u\n", inst->name, inst->ncmds);
+		MSG_INFO("%s: inst->npins    : %u\n", inst->name, inst->npins);
+		MSG_INFO("%s: inst->icdelay  : %u\n", inst->name, inst->maxicharbits);
+		MSG_INFO("%s: inst->rxdelay  : %u\n", inst->name, inst->cfg_rx.ifdelay);
+		MSG_INFO("%s: inst->txdelay  : %u\n", inst->name, inst->cfg_tx.ifdelay);
+		MSG_INFO("%s: inst->drvdelay : %u\n", inst->name, inst->cfg_tx.drivedelay);
+#endif
 
 		MSG_INFO("%s: PktUART serial configured to 8%c%c@%d\n",
 					inst->name,
@@ -2837,8 +2895,8 @@ int rtapi_app_main(void)
 		// Configure PktUART immediately and flush the fifos
 		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_FLUSH;
 		inst->cfg_tx.flags |= HM2_PKTUART_CONFIG_FLUSH;
-		if((retval = do_setup(inst, 0) < 0)) {
-			MSG_ERR("%s: error: Failure to setup PktUART\n", inst->name);
+		if((retval = hm2_pktuart_config(inst->uart, &inst->cfg_rx, &inst->cfg_tx, 0)) < 0) {
+			MSG_ERR("%s: error: PktUART setup problem: error=%d\n", inst->name, retval);
 			goto errout;
 		}
 		inst->cfg_rx.flags &= ~HM2_PKTUART_CONFIG_FLUSH;

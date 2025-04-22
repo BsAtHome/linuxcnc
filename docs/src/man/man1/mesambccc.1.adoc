@@ -155,11 +155,11 @@ other setup values as attributes:
   instructions. Default 0.
 * 'parity': [N, O, E]
   Communication parity none (N), odd (O) or even (E). Default E.
-* 'rxdelay', 'txdelay': [auto,0..1020]
+* 'rxdelay', 'txdelay': [auto, 1..1020]
   Inter frame delay between packets sent/received. The value is in bit-times.
   The appropriate value will be calculated automatically when this attribute is
   omitted. If set manually, the 'txdelay' value should generally be larger
-  than 'rxdelay' value. The value is limited to [0..255] for PktUART V2.
+  than 'rxdelay' value. The value is limited to [1..255] for PktUART V2.
   Default auto.
 * 'stopbits': [1,2]
   Communication number of stopbits. This attribute requires PktUART V3+ to have
@@ -266,7 +266,7 @@ R_INPUTREGS(4) are supported in the '<initlist>/<command>' but the returned
 data is ignored. Read functions are supported because some devices require a
 read function as a trigger.
 
-Recognized '<initlist>/<command>' attributes:
+Recognized '<initlist>/<command>' attributes when sending Modbus commands:
 
 * 'address': [0..65535]
   The Modbus coil/input/register address.
@@ -278,8 +278,6 @@ Recognized '<initlist>/<command>' attributes:
   R_INPUTREGS(4) must specify the number of coils, inputs, registers or
   inputregs to read. Write functions do not require the 'count' attribute
   because the '<data>' tags dictate the size of the packet to send.
-* 'delay': [0..60000000]
-  Communication will be suspended by 'delay' micro-seconds.
 * 'device':
   The Modbus device to communicate with. The 'device' attribute
   references '<device>[name]'.
@@ -304,6 +302,31 @@ Recognized '<initlist>/<command>' attributes:
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
   This may be required for shaky devices. Default false.
+
+
+Recognized '<initlist>/<command>' attributes in delay commands:
+
+* 'delay': [0..60000000]
+  Communication will be suspended by 'delay' micro-seconds.
+
+
+Recognized '<initlist>/<command>' attributes in communication parameter change
+commands. Attributes not specified will be taken from the '<mesamodbus>' tag's
+attributes:
+
+* 'baudrate': [1200..1000000]
+  Communication speed override.
+* 'drivedelay': [0..31]
+  The TX driver delay override.
+* 'icdelay': [auto, 1..255]
+  The inter-character delay override.
+* 'parity': [N, O, E]
+  Communication parity override.
+* 'rxdelay', 'txdelay': [auto, 1..1020]
+  Inter frame delay override.
+* 'stopbits': [1,2]
+  Communication number of stopbits override.
+
 
 Recognized '<initlist>/<command>/<data>' attributes:
 
