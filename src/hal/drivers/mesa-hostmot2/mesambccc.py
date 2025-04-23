@@ -73,7 +73,7 @@ errorflag = False
 # XXX: keep in sync with hm2_modbus.h
 MAXDELAY     = 60000000   # Max one minute delay between commands (in microseconds)
 MAXDELAYBITS = 1000000    # Max one Mega bit-times delay
-MAXPINNAME   = 24         # Max chars for a name
+MAXPINNAME   = 32         # Max chars for a name
 MAXINTERVAL  = 3600000000 # Max one hour command interval (in microseconds)
 
 # XXX: Keep in sync with hm2_modbus.h

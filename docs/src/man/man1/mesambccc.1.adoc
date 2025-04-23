@@ -425,7 +425,7 @@ interval.
   </command>
   <!-- A delay is suggested after a broadcast to allow devices to handle the data -->
   <command delay="10000" />
-  <command device="watcher" function="W_REGISTER" haltype="HAL_U32" modbustype="U_AB" address="0x1ee7" noanswer=1" resend="1">
+  <command device="watcher" function="W_REGISTER" haltype="HAL_U32" modbustype="U_AB" address="0x1ee7" noanswer="1" resend="1">
     <pin name="watcher" />
     <description>Will create a HAL_U32 pin
       - (in) hm2_modbus.0.watcher
