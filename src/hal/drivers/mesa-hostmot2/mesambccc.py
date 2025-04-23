@@ -699,6 +699,15 @@ def checkAttribs(have, may, suffix):
         pwarn("Unrecognized attribute '{}' in {}".format(a, suffix))
 
 #
+#
+#
+def printCommsOverride(cfgs, cnt):
+    print("Init {:2}: Comms override: baudrate={}, parity={}, stopbits={}, rxdelay={}, txdelay={}, drivedelay={}, icdelay={}"
+            .format(cnt, cfgs['baudrate'], ['None','Odd','Even', ''][cfgs['parity']], cfgs['stopbits'],
+                    getAutoFmt(cfgs['rxdelay'], ""), getAutoFmt(cfgs['txdelay'], ""),
+                    getAutoFmt(cfgs['drivedelay'], ""), getAutoFmt(cfgs['icdelay'], "")))
+
+#
 # Parse the <initlist> tag content
 #
 def handleInits(inits):
@@ -733,10 +742,7 @@ def handleInits(inits):
                 continue
             initlist.append(cfgs)   # Includes all required indices
             if verbose:
-                print("Init {:2}: Comms override: baudrate={}, parity={}, stopbits={}, rxdelay={}, txdelay={}, drivedelay={}, icdelay={}"
-                        .format(len(initlist), cfgs['baudrate'], ['None','Odd','Even', ''][cfgs['parity']], cfgs['stopbits'],
-                                getAutoFmt(cfgs['rxdelay'], ""), getAutoFmt(cfgs['txdelay'], ""),
-                                getAutoFmt(cfgs['drivedelay'], ""), getAutoFmt(cfgs['icdelay'], "")))
+                printCommsOverride(cfgs, len(initlist))
             continue
 
         # An init command
@@ -982,7 +988,10 @@ def handleInits(inits):
     # end for cmd in init:
 
     if sum([cfgs[k] != configparams[k] for k in RATEATTRIB]) > 0:
-        perr("Communication override(s) do not return to defaults. The <commands> may fail.")
+        pwarn("Communication override(s) do not return to defaults. Adding return to default values or the <commands> may fail.")
+        initlist.append(configparams)   # Includes all defaults required
+        if verbose:
+            printCommsOverride(configparams, len(initlist))
     return initlist
 
 #
