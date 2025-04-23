@@ -2616,7 +2616,7 @@ int rtapi_app_main(void)
 
 		if(inst->ninit > 0) {
 			// Allocate inits memory
-			if(!(inst->_init = rtapi_kzalloc(inst->ncmds * sizeof(*inst->_init), RTAPI_GFP_KERNEL))) {
+			if(!(inst->_init = rtapi_kzalloc(inst->ninit * sizeof(*inst->_init), RTAPI_GFP_KERNEL))) {
 				MSG_ERR("%s: error: Failed to allocate init commands memory\n", inst->name);
 				retval = -ENOMEM;
 				goto errout;
