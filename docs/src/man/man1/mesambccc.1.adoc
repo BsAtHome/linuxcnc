@@ -62,25 +62,25 @@ to the acceptable range.
 === MODBUS FUNCTIONS
 A subset of the Modbus functions is supported (with function number in parentheses):
 
-* R_COILS(1):
+* `R_COILS`(1):
   Maps to 1..2000 HAL output pins of type 'HAL_BIT'.
-* R_INPUTS(2)
+* `R_INPUTS`(2):
   Maps to 1..2000 HAL output pins of type 'HAL_BIT'.
-* R_REGISTERS(3)
+* `R_REGISTERS`(3):
   Maps to 1..125 HAL output pins depending 'haltype' and 'scale' attributes.
-* R_INPUTREGS(4)
+* `R_INPUTREGS`(4):
   Maps to 1..125 HAL output pins depending 'haltype' and 'scale' attributes.
-* W_COIL(5)
+* `W_COIL`(5):
   Maps to single HAL input pin of type 'HAL_BIT'.
-* W_REGISTER(6)
+* `W_REGISTER`(6):
   Maps to single HAL input pins depending 'haltype' and 'scale' attributes.
-* W_COILS(15)
+* `W_COILS`(15):
   Maps to 1..2000 HAL input pins of type 'HAL_BIT'.
-* W_REGISTERS(16)
+* `W_REGISTERS`(16):
   Maps to 1..125 HAL input pins depending 'haltype' and 'scale' attributes.
 
 You can use the function's symbolic name or numerical value in '<command>' in
-the 'function' attribute (as in function="W_REGISTERS" or function="16").
+the 'function' attribute (as in `function="W_REGISTERS"` or `function="16"`).
 
 === MODBUS TYPE
 The 'modbustype' attribute declares the interpretation of values to or from a
@@ -97,35 +97,37 @@ needs to be covered. Differences are primarily byte-ordering.
 
 The byte-ordering is specified with one of the following suffixes:
 
-* _AB, _BA
-* _ABCD, _BADC, _CDAB, _DCBA
-* _ABCDEFGH, _BADCFEHG, _CDABGHEF, _DCBAHGFE, _EFGHABCD, _FEHGBADC, _GHEFCDAB, _HGFEDCBA
+* `_AB`, `_BA`
+* `_ABCD`, `_BADC`, `_CDAB`, `_DCBA`
+* `_ABCDEFGH`, `_BADCFEHG`, `_CDABGHEF`, `_DCBAHGFE`,
+  `_EFGHABCD`, `_FEHGBADC`, `_GHEFCDAB`, `_HGFEDCBA`
 
 Modbus standard byte-ordering is big-endian, which is the first in each list
-(_AB, _ABCD and _ABCDEFGH). Little-endian is the last in each list. The user
+(`_AB`, `_ABCD` and `_ABCDEFGH`). Little-endian is the last in each list. The user
 may use any of the byte-orderings necessary and required because some device
 vendors have not paid attention to the proper on-wire ordering.
 
 The byte-ordering suffix is prefixed with S (signed), U (unsigned) or F (float)
 to complete the 'modbustype' attribute value. For example, a 32-bit float in
-big-endian is named F_ABCD. A 64-bit signed integer value in little-endian is
+big-endian is named `F_ABCD`. A 64-bit signed integer value in little-endian is
 S_HGFEDCBA.
 
 The types have following ranges and will be clamped to the min/max values if
 the 'clamp' attribute is set in the '<command>':
 
 * 16-bit:
- ** float16 [-65504.0..+65504.0] (F_AB, F_BA)
- ** signed integer [-32768..+32767] (S_AB, S_BA)
- ** unsigned integers [0..65535] (U_AB, U_BA)
+ ** float16 [-65504.0..+65504.0] (`F_AB`, `F_BA`)
+ ** signed integer [-32768..+32767] (`S_AB`, `S_BA`)
+ ** unsigned integers [0..65535] (`U_AB`, `U_BA`)
 * 32-bit:
-  ** float [-3.4e38..+3.4e38] (F_ABCD...F_DCBA)
-  ** signed integer [-2147483648..+2147483647] (S_ABCD...S_DCBA)
-  ** unsigned integer [0..4294967296] (U_ABCD...U_DCBA)
+  ** float [-3.4e38..+3.4e38] (`F_ABCD`...`F_DCBA`)
+  ** signed integer [-2147483648..+2147483647] (`S_ABCD`...`S_DCBA`)
+  ** unsigned integer [0..4294967296] (`U_ABCD`...`U_DCBA`)
 * 64-bit:
-  ** double [-1.7e308..+1.7e308] (F_ABCDEFGH...F_HGFEDCBA)
-  ** signed integer [-9223372036854775808..9223372036854775807] (S_ABCDEFGH...S_HGFEDCBA)
-  ** unsigned integer [0...18446744073709551615] (U_ABCDEFGH...U_HGFEDCBA)
+  ** double [-1.7e308..+1.7e308] (`F_ABCDEFGH`...`F_HGFEDCBA`)
+  ** signed integer [-9223372036854775808..9223372036854775807]
+     (`S_ABCDEFGH`...`S_HGFEDCBA`)
+  ** unsigned integer [0...18446744073709551615] (`U_ABCDEFGH`...`U_HGFEDCBA`)
 
 
 === <mesamodbus>
@@ -246,9 +248,12 @@ user's comment.
 </initlist>
 ----
 
-A '<command>' is either a delay instruction or a Modbus transaction to perform.
-Only the 'delay' and 'device' attribute is supported in case of a delay
-instruction. All activity is suspended during the specified delay.
+A '<command>' is either a delay instruction, a communication parameter change
+or a Modbus transaction to perform. Only the 'delay' attribute is supported in
+case of a delay instruction and all activity is suspended during the specified
+delay. A communication parameter change can use any communication related
+attribute from the '<mesamodbus>' tag and must revert to the defaults set in
+the '<mesamodbus>' tag at the end on the '<initlist>'.
 
 Modbus write functions must include one or more '<data>' tags to encapsulate
 the data to send. The '<data>' tag has a mandatory attribute 'value' to capture
@@ -256,13 +261,13 @@ the value to send. An optional 'modbustype' attribute models the data to send
 to the format of the 'modbustype'. The default is U_AB if the type is not
 specified.
 
-The write coils Modbus function W_COILS(15) further restrict the 'value' to
-zero (0) or one (1). The write coil W_COIL(5) has a fixed type of U_AB and
+The write coils Modbus function `W_COILS`(15) further restrict the 'value' to
+zero (0) or one (1). The write coil `W_COIL`(5) has a fixed type of U_AB and
 expects a value of 0x0000 or 0xff00. Other values may be given, but a warning
 will then be emitted.
 
-The Modbus read functions R_COILS(1), R_INPUTS(2), R_REGISTERS(3) and
-R_INPUTREGS(4) are supported in the '<initlist>/<command>' but the returned
+The Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
+`R_INPUTREGS`(4) are supported in the '<initlist>/<command>' but the returned
 data is ignored. Read functions are supported because some devices require a
 read function as a trigger.
 
@@ -274,8 +279,8 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   Set to true if a device sends an answer on broadcast, which must be ignored.
   Default false.
 * 'count': [1..2000]/[1..125]
-  Modbus read functions R_COILS(1), R_INPUTS(2), R_REGISTERS(3) and
-  R_INPUTREGS(4) must specify the number of coils, inputs, registers or
+  Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
+  `R_INPUTREGS`(4) must specify the number of coils, inputs, registers or
   inputregs to read. Write functions do not require the 'count' attribute
   because the '<data>' tags dictate the size of the packet to send.
 * 'device':
@@ -301,7 +306,7 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   Set to true if the command is known to (periodically) timeout and no error
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
-  This may be required for shaky devices. Default false.
+  This may be required for flaky devices. Default false.
 
 
 Recognized '<initlist>/<command>' attributes in delay commands:
@@ -349,32 +354,44 @@ specific type using the 'haltype' attribute. Recognized are:
 * 'HAL_U64'
 
 The types are also recognized without the HAL_ prefix. Note that coil and
-binary input functions R_COILS(1), R_INPUTS(2), W_COIL(5) and W_COILS(15) can
+binary input functions `R_COILS`(1), `R_INPUTS`(2), `W_COIL`(5) and `W_COILS`(15) can
 only map to 'HAL_BIT' and do so implicitly.
 
 The 'HAL_BIT', 'HAL_U32' and 'HAL_U64' types always map to one single HAL pin.
 
 The 'HAL_FLOAT', 'HAL_S32' and 'HAL_S64' types can generate one single pin or
 can generate multiple pins with 'offset' and 'scale'. Output pins with
-R_REGISTERS(3) and R_INPUTREGS(4) can add a 'scaled' pin to the set.
+`R_REGISTERS`(3) and `R_INPUTREGS`(4) can add a 'scaled' pin to the set.
 
 Mapping HAL pins to commands requires a 'modbustype' attribute to encode the
-format and necessary conversions. Register functions R_REGISTERS(3),
-R_INPUTREGS(4), W_REGISTER(6) and W_REGISTERS(16) may map to 'HAL_BIT' only
+format and necessary conversions. Register functions `R_REGISTERS`(3),
+`R_INPUTREGS`(4), `W_REGISTER`(6) and `W_REGISTERS`(16) may map to 'HAL_BIT' only
 when using unsigned 'modbustype' where a value of zero (0) is _false_ and any
-other value is _true_.
+other value is _true_ for write functions or one (1) for read functions.
 
 === <commands>
-The '<commands>' section encompasses one or more '<command>' tags to describe
-the Modbus function(s) to execute in a periodical way. Each '<command>' tag
-maps to one or more HAL pins and specifies data conversion between device data
-and HAL pin data.
+The '<commands>' section defines one or more '<command>' tags to describe the
+Modbus function(s) to execute in a periodical way. Each '<command>' tag maps to
+one or more HAL pins and specifies data conversion between device data and HAL
+pin data.
+
+A delay command may be added using the 'delay' attribute causing the
+communication to be suspended for the specified time. This may be required in
+broadcast situations where the Modbus devices must have time for internal
+processing before the next data is sent or requested.
 
 The '<command>' entries may include a '<description>' child-tag, which serves
 as a user's comment.
 Additionally, the '<command>' tag may have one or more '<pin>' child-tags to
 create user-defined HAL pin names. Each '<pin>' tag may again include
 a '<description>' child-tag.
+
+Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
+`R_INPUTREGS`(4) will always be sent at the specified interval. However, the
+Modbus write functions `W_COIL`(5), `W_REGISTER`(6), `W_COILS`(15) and
+`W_REGISTERS`(16) are _only_ sent when the source data (pin value) changed. You
+must specify the 'resend' attribute to force repeated writes at the specified
+interval.
 
 [source,xml]
 ----
@@ -448,18 +465,22 @@ Recognized '<commands>/<command>' attributes:
   The attribute value is one of the supported Modbus functions.
 * 'haltype': [see *HAL TYPES*]
   The HAL pin type for interactions. You do not need to specify this attribute
-  for Modbus functions read/write coil(s) or inputs R_COILS(1), R_INPUTS(2),
-  W_COIL(5) and W_COILS(15) as these always use the 'HAL_BIT' type.
+  for Modbus functions read/write coil(s) or inputs `R_COILS`(1), `R_INPUTS`(2),
+  `W_COIL`(5) and `W_COILS`(15) as these always use the 'HAL_BIT' type.
 * 'interval': [once,0..3600000000]
   The command repeat interval in micro-seconds. This is the time between
   repeating this '<command>'. An interval shorter than the time it takes to work
   through the '<commands>' list will just repeat this '<command>' as fast as
   possible. A special value of 'once' will run this command only once. However,
-  it will be retried is an error occurred. Default 0.
+  it will be retried is an error occurred. +
+  You normally do not need the value 'once' and it may be better to use an
+  entry in the '<initlist>'. But sometimes you need to have other periodical
+  commands before a 'once' marked command that cannot be achieved in the
+'<initlist>' sequence. Default 0.
 * 'modbustype': [see *MODBUS TYPES*]
   The Modbus data mapping from/to register(s) for Modbus functions read/write
-  register(s) R_REGISTERS(3), R_INPUTREGS(4), W_REGISTER(6) and
-  W_REGISTERS(16). The default is U_AB if not specified.
+  register(s) `R_REGISTERS`(3), `R_INPUTREGS`(4), `W_REGISTER`(6) and
+  `W_REGISTERS`(16). The default is U_AB if not specified.
 * 'name':
   The base name for HAL pin names. If 'count="2"' and 'name="myname"', the the
   pins will have names like _myname-00_, _myname-01_, unless one or more '<pin>'
@@ -473,17 +494,18 @@ Recognized '<commands>/<command>' attributes:
   commands. Some devices require a constant "reminder" (like watchdogs) and
   you need to send the data regularly. Default false.
 * 'scale': [Boolean]
-  Add scaling HAL pins. Modbus read functions R_REGISTERS(3) and R_INPUTREGS(4)
+  Add scaling HAL pins. Modbus read functions `R_REGISTERS`(3) and `R_INPUTREGS`(4)
   add extra HAL pins *pin.name.offset* (in, 64-bit 'haltype'), *pin.name.scale*
   (in, 'HAL_FLOAT') and *pin.name.scaled* (out, 'HAL_FLOAT'). +
-  The Modbus write functions W_REGISTER(6) and W_REGISTERS(16) create extra HAL
+  The Modbus write functions `W_REGISTER`(6) and `W_REGISTERS`(16) create extra HAL
   pins *pin.name.offset* (in, 64-bit 'haltype') and *pin.name.scale*
   (in, 'HAL_FLOAT'). +
   The 'scale' attribute is only supported for 'HAL_FLOAT', 'HAL_S32' and 'HAL_S64'.
   Default is true for 'HAL_FLOAT' and false for others. The *scale* pin is
-  initialized to one (1 or 1.0) and the *offset* pin is initialized to zero (0) +
+  initialized to one (1.0) and the *offset* pin is initialized to zero (0). +
   Scaling is always multiplicative to prevent division-by-zero. The offset is
-  always subtracted before scaling. The scaling action performed is:
+  always subtracted before scaling. The scaling action performed and subject to
+  clamping is:
 
   ** read: pin.name = "readvalue"
   ** read: pin.name.scaled = ("readvalue" - pin.name.offset) * pin.name.scale
@@ -504,15 +526,15 @@ Recognized '<commands>/<command>' attributes:
   Set to true if the command is known to (periodically) timeout and no error
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
-  This may be required for shaky devices. Default false.
+  This may be required for flaky devices. Default false.
 
 Defining '<pin>' tags allows for custom naming schemes and allows reducing read
-and write function overhead. Using '<pin>' tags allows for different 'modbustype'
-and 'haltype' values to be read or written to consecutive addresses. A warning
-is emitted if 32-bit and 64-bit values are not aligned to their native boundary
-(it may be an error, depending device). The attributes of the '<command>' tag
-set the defaults for the '<pin>' tag attributes and can be overridden by adding
-them to the '<pin>' tag.
+and write function overhead. Using '<pin>' tags enables you to combine
+different 'modbustype' and 'haltype' values to be read or written to or from
+consecutive addresses. A warning is emitted if 32-bit and 64-bit values are not
+aligned to their native boundary (it may be an error, depending device). The
+attributes of the '<command>' tag set the defaults for the '<pin>' tag
+attributes and can be overridden by adding them to the '<pin>' tag.
 
 [source,xml]
 ----
@@ -527,6 +549,15 @@ them to the '<pin>' tag.
   <pin name="afloat">
     <description>addr: 0x0244-0x0245 Use all defaults from command</description>
   </pin>
+<!--
+  The above <command><pin> tags read 6 registers and generate pins:
+  hm2_modbus.0.speed         HAL_FLOAT (out)
+  hm2_modbus.0.ping          HAL_BIT   (out)
+  hm2_modbud.0.afloat        HAL_FLOAT (out)
+  hm2_modbud.0.afloat.offset HAL_FLOAT (in)
+  hm2_modbud.0.afloat.scale  HAL_FLOAT (in)
+  hm2_modbud.0.afloat.scaled HAL_FLOAT (out)
+-->
 </command>
 ----
 
@@ -535,22 +566,24 @@ Recognized '<commands>/<command>/<pin>' attributes:
 * 'clamp': [Boolean] The clamp setting override for this pin.
 * 'haltype': [see *HAL TYPES*] The HAL type override for this pin.
 * 'modbustype': [see *MODBUS TYPES*] The Modbus type override for this pin.
-* 'name': mandatory
+* 'name':
   Specifies the pin name overriding the default '<command>[name]-xx' sequence.
   This makes the HAL names more human readable.
 * 'scale': [Boolean] The scale setting override for this pin.
-* 'skip': [0..24] Skip a number of registers ignoring then for read functions
+* 'skip': [0..24] Skip a number of registers ignoring them for read functions
   and writing zero (0) for write functions. There can not be other attributes
   if the 'skip' attribute is used. +
   Using a 'skip' value larger than 11 will emit a warning. Large skips make the
   transfers less efficient and skipping 12+ registers may be better off by
   splitting the function in two commands. An exception may be atomicity where
-  the device allows access to the intermediate unused register addresses and
+  the device allows access to the intermediate (unused) register addresses and
   only guarantees atomicity in a single read/write transaction. +
   Beware that the skipped registers *must* be readable or writable (depending
   function). The skipped values must be transferred in the Modbus transaction
   and the target device must allow read or write access to the skipped register
-  addresses.
+  addresses. +
+  Beware:
+  using 'skip' in write commands *writes value zero (0) to the skipped registers*.
 
 == SEE ALSO
 
