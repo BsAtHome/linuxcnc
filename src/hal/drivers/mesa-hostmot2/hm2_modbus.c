@@ -259,7 +259,7 @@ typedef struct {
 
 	int			state;			// State-machine state
 	bool		suspended;		// Suspend operation when set
-	int			ignoredata;		// Ignore received packet if set
+	bool		ignoredata;		// Ignore received packet if set
 	unsigned	rxversion;		// The version of the PktUART RX channel
 	unsigned	txversion;		// The version of the PktUART TX channel
 	unsigned	maxicharbits;	// The max allowed inter-character delay (in bit-times)
@@ -613,6 +613,41 @@ static void do_timeout(hm2_modbus_inst_t *inst)
 }
 
 //
+// Write flush sets all command data to the current values.
+// Only Modbus write function are pre-calculated.
+//
+static void write_flush(hm2_modbus_inst_t *inst)
+{
+	unsigned oldidx = inst->cmdidx;	// Save the position
+	for(unsigned i = 0; i < inst->ncmds; i++) {
+		inst->cmdidx = i;	// This sets the current command index
+		hm2_modbus_cmd_t *cc = current_cmd(inst);	// so this is the one we want
+		switch(cc->cmd.func) {
+		case MBCMD_W_COIL:
+		case MBCMD_W_COILS:
+		case MBCMD_W_REGISTER:
+		case MBCMD_W_REGISTERS:
+			break;	// Only write functions shall be built
+		default:
+			continue;
+		}
+		// Pre build the frame, even when disabled. When the WFLUSH flag is
+		// set, then we still want timed out writes that are disabled, and
+		// re-enabled due to a reset, to adhere to the flush setting when they
+		// suddenly no longer timeout.
+		int r = build_data_frame(inst);
+		if(r < 0) {
+			// We cannot recover from data frames that cannot be build. They
+			// would always result in the same error.
+			MSG_ERR("%s: error: Build data frame failed in write_flush for command %d, disabling\n", inst->name, inst->cmdidx);
+			cc->disabled = 1;
+			set_error(inst, -r);
+		}
+	}
+	inst->cmdidx = oldidx;	// Restore position
+}
+
+//
 // The main process Modbus state-machine.
 //
 // It is essentially a synchronous communication machine that:
@@ -632,10 +667,15 @@ static void process(void *arg, long period)
 	hm2_modbus_inst_t *inst = (hm2_modbus_inst_t *)arg;
 
 	if(inst->suspended) {
-		if(!*(inst->hal->suspend))
+		if(!*(inst->hal->suspend)) {
 			inst->suspended = 0;
-		else
+			// When coming out of suspend, see if we want to suppress writes
+			// because our local data will most likely not match the pin data.
+			if(inst->mbccb->format & MBCCB_FORMAT_WFLUSH)
+				write_flush(inst);
+		} else {
 			return;
+		}
 	}
 
 	int r;
@@ -1042,8 +1082,8 @@ static inline int ch_append16(hm2_modbus_cmd_t *cc, rtapi_u16 v)
 }
 
 //
-// The byteswaps array MUST follow the MBT_xx, MBT_xxxx and MBT_xxxxxxxx endian
-// defines.
+// The byteswaps array indices MUST follow the MBT_xx, MBT_xxxx and
+// MBT_xxxxxxxx endian defines.
 //
 typedef rtapi_u8 byteswaps_t[8];
 static const byteswaps_t byteswaps[2+4+8] = {
@@ -2663,7 +2703,7 @@ int rtapi_app_main(void)
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->icdelay),  comp_id, "%s.icdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->txdelay),  comp_id, "%s.txdelay", inst->name));
 		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->rxdelay),  comp_id, "%s.rxdelay", inst->name));
-		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->drvdelay), comp_id, "%s.drive-delay", inst->name));
+		CHECK(hal_param_u32_newf(HAL_RO, &(inst->hal->drvdelay), comp_id, "%s.drivedelay", inst->name));
 
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->suspend),   comp_id, "%s.suspend", inst->name));
 		CHECK(hal_pin_bit_newf(HAL_IN,  &(inst->hal->reset),     comp_id, "%s.reset", inst->name));
@@ -2766,7 +2806,14 @@ int rtapi_app_main(void)
 		*(inst->hal->fault)     = 0;
 		*(inst->hal->faultcmd)  = 0;
 		*(inst->hal->lasterror) = 0;
-		*(inst->hal->suspend)   = inst->suspended = 0 != (inst->mbccb->format & MBCCB_FORMAT_SUSPEND);
+		*(inst->hal->suspend)   = 0 != (inst->mbccb->format & MBCCB_FORMAT_SUSPEND);
+		// Start with internal suspended bit set. The HAL pin will dictate to
+		// move to the active state in the process() function. This enables to
+		// use the WFLUSH setting each time we come out of suspend and,
+		// especially, the first process() invocation will honor the WFLUSH if
+		// we do not start suspended because the HAL pin will be different from
+		// the current 'suspended' setting.
+		inst->suspended = 1;
 
 		unsigned p = 0;
 #define CPTR(x)	((const char *)((x) + 1))

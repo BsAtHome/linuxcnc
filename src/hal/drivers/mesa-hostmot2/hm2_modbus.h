@@ -15,11 +15,13 @@
 #define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2 0=8x1 1=8x2
 #define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3 Set for full-duplex (rx-mask off)
 #define MBCCB_FORMAT_SUSPEND_BIT      4 // bit  4 Set if state-machine starts suspended
+#define MBCCB_FORMAT_WFLUSH_BIT       5 // bit  5 Set if initial writes are suppressed
 #define MBCCB_FORMAT_PARITYEN         (1u << MBCCB_FORMAT_PARITYEN_BIT)
 #define MBCCB_FORMAT_PARITYODD        (1u << MBCCB_FORMAT_PARITYODD_BIT)
 #define MBCCB_FORMAT_STOPBITS2        (1u << MBCCB_FORMAT_STOPBITS2_BIT)
 #define MBCCB_FORMAT_DUPLEX           (1u << MBCCB_FORMAT_DUPLEX_BIT)
 #define MBCCB_FORMAT_SUSPEND          (1u << MBCCB_FORMAT_SUSPEND_BIT)
+#define MBCCB_FORMAT_WFLUSH           (1u << MBCCB_FORMAT_WFLUSH_BIT)
 
 // XXX: keep in sync with mesamodbus.py
 // Max one minute delay between init commands (in microseconds)

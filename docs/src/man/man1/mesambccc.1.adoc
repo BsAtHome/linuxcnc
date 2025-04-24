@@ -127,27 +127,27 @@ the 'clamp' attribute is set in the '<command>':
   ** double [-1.7e308..+1.7e308] (`F_ABCDEFGH`...`F_HGFEDCBA`)
   ** signed integer [-9223372036854775808..9223372036854775807]
      (`S_ABCDEFGH`...`S_HGFEDCBA`)
-  ** unsigned integer [0...18446744073709551615] (`U_ABCDEFGH`...`U_HGFEDCBA`)
+  ** unsigned integer [0..18446744073709551615] (`U_ABCDEFGH`...`U_HGFEDCBA`)
 
 
 === <mesamodbus>
 The main enclosing tag '<mesamodbus>' contains the communication parameters and
 other setup values as attributes:
 
-* 'baudrate': [1200..1000000]
+*baudrate* [1200..1000000]::
   Communication speed. Any speed over 460800 will result in side-effects
   because the internal hardware timers may overflow to keep track of the Modbus
   protocol requirements. Default 9600.
-* 'drivedelay': [0..31]
+*drivedelay* [0..31]::
   The delay, in bit-times, before transmission begins after enabling the
   transmitter hardware output driver. Default 1.
-* 'duplex': [full,half]
+*duplex* [full,half]::
   Whether 2-wire (half duplex) or 4-wire (full duplex) communication is set.
   Default half.
-* 'icdelay': [auto, 1..255]
+*icdelay* [auto, 1..255]::
   The maximum allowed inter-character delay between two received characters in
   bit-times. Default: auto.
-* 'interval': [0..3600000000]
+*interval* [0..3600000000]::
   The default command repeat interval in micro-seconds. This is effectively the
   time between repeating the '<commands>' list (sending writes and receiving
   reads from the Modbus devices). An interval shorter than the time it takes to
@@ -155,27 +155,36 @@ other setup values as attributes:
   fast as possible. +
   The 'interval' may be overridden in the individual '<commands><command>'
   instructions. Default 0.
-* 'parity': [N, O, E]
+*parity* [N, O, E]::
   Communication parity none (N), odd (O) or even (E). Default E.
-* 'rxdelay', 'txdelay': [auto, 1..1020]
+*rxdelay*, *txdelay* [auto, 1..1020]::
   Inter frame delay between packets sent/received. The value is in bit-times.
   The appropriate value will be calculated automatically when this attribute is
   omitted. If set manually, the 'txdelay' value should generally be larger
   than 'rxdelay' value. The value is limited to [1..255] for PktUART V2.
   Default auto.
-* 'stopbits': [1,2]
+*stopbits* [1,2]::
   Communication number of stopbits. This attribute requires PktUART V3+ to have
   any effect. Default 1.
-* 'suspend': [Boolean]
+*suspend* [Boolean]::
   Start with suspended communication when set. This enables you to setup pin,
   scale and offset values in the HAL file(s) using setp/sets commands before
   data is written to any Modbus device. Default false.
-* 'timeout' [auto,10000..10000000]
+*timeout* [auto,10000..10000000]::
   The standard time a command may take in micro-seconds (send request plus
   handling plus receive reply) before the command is deemed lost. The special
   value of 'auto' will calculate an appropriate timeout value from the request
   and reply sizes. The 'timeout' value can be overridden in the '<command>'
   definitions. Default auto.
+*writeflush* [Boolean]::
+  Set to true when the _very first_ round of write commands must be flushed to
+  synchronize the internal state to the pin state. This flush happens either
+  once when the module starts or each time the module comes out of 'suspend'. +
+  The write flush is necessary when you need to ensure proper and correct pin
+  data is present _before_ the Modbus commands start sending potentially
+  harmful or invalid data because the pins have not yet been initialized to
+  their proper values. When set, only pin values that are changed from their
+  initial values are propagated in Modbus write commands. Default true.
 
 The default parameters, without any attributes defined in '<mesamodbus>', are
 half duplex serial setup using 8E1@9600 and running all commands as fast as
@@ -202,10 +211,10 @@ a '<description>' tag, which serves as a user's comment.
 
 Recognized '<devices>/<device>' attributes:
 
-* 'address': [1..247]
+*address* [1..247]::
   The Modbus slave device ID. The Modbus reserved address range 248..255 is
   accepted, but a warning is emitted.
-* 'name':
+*name*::
   The 'name' of the device. The name must be in lower case ASCII and adhere to
   the HAL specification comprising of letters and numbers with optional dash
   and period. It is strongly advised to use letters only in a descriptive
@@ -243,7 +252,8 @@ user's comment.
   <command device="fltbox" function="W_REGISTERS" address="0xcafe">
     <data modbustype="F_ABCD" value="0.53" />
     <data modbustype="F_ABCD" value="99.999" />
-    <description>Send four 16-bit words: 0x3f07 0xae14 0x42c7 0xff7d (floats in binary, big-endian)</description>
+    <description>Send four 16-bit words: 0x3f07 0xae14 0x42c7 0xff7d
+                 (floats in binary, big-endian)</description>
   </command>
 </initlist>
 ----
@@ -273,36 +283,37 @@ read function as a trigger.
 
 Recognized '<initlist>/<command>' attributes when sending Modbus commands:
 
-* 'address': [0..65535]
-  The Modbus coil/input/register address.
-* 'bcanswer': [Boolean]
+*address* [0..65535]::
+  The Modbus coil/input/register starting address.
+*bcanswer* [Boolean]::
   Set to true if a device sends an answer on broadcast, which must be ignored.
   Default false.
-* 'count': [1..2000]/[1..125]
+*count* [1..2000]/[1..125]::
   Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
   `R_INPUTREGS`(4) must specify the number of coils, inputs, registers or
   inputregs to read. Write functions do not require the 'count' attribute
   because the '<data>' tags dictate the size of the packet to send.
-* 'device':
+*device*::
   The Modbus device to communicate with. The 'device' attribute
-  references '<device>[name]'.
-* 'function': [see *MODBUS FUNCTIONS*]
+  references '<device>[name]'. +
+  The device name '`broadcast`' will send the command to all devices on the bus.
+*function* [see *MODBUS FUNCTIONS*]::
   The attribute value is one of the supported Modbus functions.
-* 'noanswer': [Boolean]
+*noanswer* [Boolean]::
   Set to true if a device does not return a reply to a command. This can be
   intentional if you send a command to a non-existing device. Default false.
-* 'timeout': [0..60000000]
+*timeout* [0..60000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command in
   *micro-seconds* (send request plus handling plus receive reply) before the
   command is deemed lost. See also 'timeoutbits' below.
   Default '<mesamodbus>[timeout]'.
-* 'timeoutbits': [0..1000000]
+*timeoutbits* [0..1000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command
   in *bit times* (send request plus handling plus receive reply) before the
   command is deemed lost. The actual timeout is automatically calculated and
   scaled by the '<mesamodbus>[baudrate]' setting. See also 'timeout' above.
   Default use 'timeout' attribute.
-* 'timesout': [Boolean]
+*timesout* [Boolean]::
   Set to true if the command is known to (periodically) timeout and no error
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
@@ -311,7 +322,7 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
 
 Recognized '<initlist>/<command>' attributes in delay commands:
 
-* 'delay': [0..60000000]
+*delay* [0..60000000]::
   Communication will be suspended by 'delay' micro-seconds.
 
 
@@ -319,28 +330,28 @@ Recognized '<initlist>/<command>' attributes in communication parameter change
 commands. Attributes not specified will be taken from the '<mesamodbus>' tag's
 attributes:
 
-* 'baudrate': [1200..1000000]
+*baudrate* [1200..1000000]::
   Communication speed override.
-* 'drivedelay': [0..31]
+*drivedelay* [0..31]::
   The TX driver delay override.
-* 'icdelay': [auto, 1..255]
+*icdelay* [auto, 1..255]::
   The inter-character delay override.
-* 'parity': [N, O, E]
+*parity* [N, O, E]::
   Communication parity override.
-* 'rxdelay', 'txdelay': [auto, 1..1020]
+*rxdelay*, *txdelay* [auto, 1..1020]::
   Inter frame delay override.
-* 'stopbits': [1,2]
+*stopbits* [1,2]::
   Communication number of stopbits override.
 
 
 Recognized '<initlist>/<command>/<data>' attributes:
 
-* 'modbustype': [see *MODBUS TYPE*]
+*modbustype* [see *MODBUS TYPE*]::
   The destination format and translation of the 'value' attribute.
-* 'value': mandatory numerical value of data to send.
-  The format defaults to unsigned 16-bit integer but depends on the
-  'modbustype' attribute and the range of acceptable values depends on the
-  Modbus function.
+*value*::
+  The numerical value of the data to send. The format defaults to unsigned
+  16-bit integer but depends on the 'modbustype' attribute and the range of
+  acceptable values depends on the Modbus function.
 
 === HAL TYPES
 A '<command>' in the '<commands>' section maps to one or more HAL pins with
@@ -404,7 +415,8 @@ interval.
        - (out) hm2_modbus.0.wavebox.state-03
     </description>
   </command>
-  <command device="scd30" modbustype="F_ABCD" haltype="HAL_FLOAT" function="R_REGISTERS" address="0x0028" scale="0">
+  <command device="scd30" modbustype="F_ABCD" haltype="HAL_FLOAT" function="R_REGISTERS"
+           address="0x0028" scale="0">
     <pin name="co2"><description>Too much will kill you...</description></pin>
     <pin name="temperature" />
     <pin name="humidity" />
@@ -415,7 +427,8 @@ interval.
        Count will automatically be calculated (6 Modbus 16-bit registers).
     </description>
   </command>
-  <command device="broadcast" function="W_COILS" address="0x1234" count="2" name="anyandall" bcanswer="1">
+  <command device="broadcast" function="W_COILS" address="0x1234" count="2"
+           name="anyandall" bcanswer="1">
     <description>Will create HAL_BIT pins:
       - (in) hm2_modbus.0.anyandall-00
       - (in) hm2_modbus.0.anyandall-01
@@ -425,15 +438,17 @@ interval.
   </command>
   <!-- A delay is suggested after a broadcast to allow devices to handle the data -->
   <command delay="10000" />
-  <command device="watcher" function="W_REGISTER" haltype="HAL_U32" modbustype="U_AB" address="0x1ee7" noanswer="1" resend="1">
+  <command device="watcher" function="W_REGISTER" haltype="HAL_U32" modbustype="U_AB"
+           address="0x1ee7" noanswer="1" resend="1">
     <pin name="watcher" />
     <description>Will create a HAL_U32 pin
       - (in) hm2_modbus.0.watcher
-      The 'count' is implicit 1. The data is mapped to U_AB and is clamped. The data
-      is sent every time (resend=1), regardless whether the HAL pin changed. No
-      answer is expected to be received (noanswer=1). This command generates a
-      (valid) Modbus packet on the bus and nothing more. You must be sure that no
-      reply is sent from the device or errors will occur (f.ex. silent watchdog).
+      The 'count' is implicit 1. The data is mapped to U_AB and is clamped.
+      The data is sent every time (resend=1), regardless whether the HAL pin
+      changed. No answer is expected to be received (noanswer=1). This
+      command generates a (valid) Modbus packet on the bus and nothing more.
+      You must be sure that no reply is sent from the device or errors will
+      occur (f.ex. silent watchdog).
     </description>
   </command>
 </commands>
@@ -441,59 +456,62 @@ interval.
 
 Recognized '<commands>/<command>' attributes:
 
-* 'address': [0..65535]
-  The Modbus coil/input/register address.
-* 'bcanswer': [Boolean]
+*address* [0..65535]::
+  The Modbus coil/input/register starting address.
+*bcanswer* [Boolean]::
   Set to true if a device sends an answer on broadcast, which must be ignored.
   Default false.
-* 'clamp': [Boolean]
+*clamp* [Boolean]::
   Conversion from larger to smaller types are automatically clamped to their
   maximum/minimum values. It works in both ways: read => HAL-out and write <=
   HAL-in. Setting this to false can result in truncated values. Default is true.
-* 'count': [1..2000]/[1..125]/[1..62]/[1..31] (depends 'haltype' and 'modbustype')
+*count* [1..2000]/[1..125]/[1..62]/[1..31]::
   The 'count' specifies the number of HAL pins to create. The data from these pins
   is read from or written to the Modbus device. Alternatively, you can specify
   the HAL pins using the '<pin>' child-tags. If both 'count' and '<pin>' are
   specified and 'count' is larger than the number of '<pin>' tags, then
-  additional HAL pins will be created to match the count.
-* 'delay': [0..60000000]
+  additional HAL pins will be created to match the count. +
+  (the range depends on 'haltype' and 'modbustype')
+*delay* [0..60000000]::
   Suspend activity and delay the next '<command>' by 'delay' micro-seconds.
-* 'device':
+*device*::
   The Modbus device to communicate with. The 'device' attribute
-  references '<device>[name]'.
-* 'function': [see *MODBUS FUNCTIONS*]
+  references '<device>[name]'. +
+  The device name '`broadcast`' will send the command to all devices on the bus.
+*function* [see *MODBUS FUNCTIONS*]::
   The attribute value is one of the supported Modbus functions.
-* 'haltype': [see *HAL TYPES*]
+*haltype* [see *HAL TYPES*]::
   The HAL pin type for interactions. You do not need to specify this attribute
   for Modbus functions read/write coil(s) or inputs `R_COILS`(1), `R_INPUTS`(2),
   `W_COIL`(5) and `W_COILS`(15) as these always use the 'HAL_BIT' type.
-* 'interval': [once,0..3600000000]
+*interval* [once,0..3600000000]::
   The command repeat interval in micro-seconds. This is the time between
   repeating this '<command>'. An interval shorter than the time it takes to work
   through the '<commands>' list will just repeat this '<command>' as fast as
-  possible. A special value of 'once' will run this command only once. However,
-  it will be retried is an error occurred. +
-  You normally do not need the value 'once' and it may be better to use an
-  entry in the '<initlist>'. But sometimes you need to have other periodical
-  commands before a 'once' marked command that cannot be achieved in the
-'<initlist>' sequence. Default 0.
-* 'modbustype': [see *MODBUS TYPES*]
+  possible. +
+  A special value of 'once' will run this command only once. However, it will
+  be retried is an error occurred.  You normally do not need the value 'once'
+  and it may be better to use an entry in the '<initlist>'. But sometimes you
+  need to have other periodic commands before a 'once' marked command that
+  cannot be achieved in the '<initlist>' sequence. Default '<mesamodbus>[interval]'.
+*modbustype* [see *MODBUS TYPES*]::
   The Modbus data mapping from/to register(s) for Modbus functions read/write
   register(s) `R_REGISTERS`(3), `R_INPUTREGS`(4), `W_REGISTER`(6) and
   `W_REGISTERS`(16). The default is U_AB if not specified.
-* 'name':
-  The base name for HAL pin names. If 'count="2"' and 'name="myname"', the the
-  pins will have names like _myname-00_, _myname-01_, unless one or more '<pin>'
-  tags override the name.
-* 'noanswer': [Boolean]
+*name*::
+  The base name for HAL pin names. +
+  Example: if 'count="2"' and 'name="myname"', the the pins will have names
+  like _myname-00_, _myname-01_, unless one or more '<pin>' tags override the
+  name.
+*noanswer* [Boolean]::
   Set to true if a device does not return a reply to a command. This can be
   intentional if you send a command to a non-existing device. Default false.
-* 'resend': [Boolean]
+*resend* [Boolean]::
   Resend Modbus write command even though no HAL pin change (data to send
   change) was detected. Normally, only data changes are sent using Modbus write
   commands. Some devices require a constant "reminder" (like watchdogs) and
   you need to send the data regularly. Default false.
-* 'scale': [Boolean]
+*scale* [Boolean]::
   Add scaling HAL pins. Modbus read functions `R_REGISTERS`(3) and `R_INPUTREGS`(4)
   add extra HAL pins *pin.name.offset* (in, 64-bit 'haltype'), *pin.name.scale*
   (in, 'HAL_FLOAT') and *pin.name.scaled* (out, 'HAL_FLOAT'). +
@@ -507,22 +525,22 @@ Recognized '<commands>/<command>' attributes:
   always subtracted before scaling. The scaling action performed and subject to
   clamping is:
 
-  ** read: pin.name = "readvalue"
-  ** read: pin.name.scaled = ("readvalue" - pin.name.offset) * pin.name.scale
-  ** write: "sendvalue" = (pin.name - pin.name.offset) * pin.name.scale
+  ** read: `pin.name = "readvalue"`
+  ** read: `pin.name.scaled = ("readvalue" - pin.name.offset) * pin.name.scale`
+  ** write: `"sendvalue" = (pin.name - pin.name.offset) * pin.name.scale`
 
-* 'timeout': [0..60000000]
+*timeout* [0..60000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command in
   *micro-seconds* (send request plus handling plus receive reply) before the
   command is deemed lost. See also 'timeoutbits' below.
   Default '<mesamodbus>[timeout]'.
-* 'timeoutbits': [0..1000000]
+*timeoutbits* [0..1000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command
   in *bit times* (send request plus handling plus receive reply) before the
   command is deemed lost. The actual timeout is automatically calculated and
   scaled by the '<mesamodbus>[baudrate]' setting. See also 'timeout' above.
   Default '<mesamodbus>[timeout]'.
-* 'timesout': [Boolean]
+*timesout* [Boolean]::
   Set to true if the command is known to (periodically) timeout and no error
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
@@ -538,17 +556,20 @@ attributes and can be overridden by adding them to the '<pin>' tag.
 
 [source,xml]
 ----
-<command device="booboo" function="R_REGISTERS" address="0x0240" haltype="HAL_FLOAT" modbustype="F_ABCD" scale="1">
-  <pin name="speed" scale="0">
-    <description>addr: 0x0240-0x0241 Use defaults from command but disable scaling pins</description>
-  </pin>
-  <pin name="ping" haltype="HAL_BIT" modbustype="U_AB">
-    <description>addr: 0x0242 Override: one register map to bit</description>
-  </pin>
-  <pin skip="1" /> <!-- Align the next value -->
-  <pin name="afloat">
-    <description>addr: 0x0244-0x0245 Use all defaults from command</description>
-  </pin>
+<command device="booboo"
+         function="R_REGISTERS"
+         address="0x0240"
+         haltype="HAL_FLOAT"
+         modbustype="F_ABCD"
+         scale="1">
+  <!-- addr: 0x0240-0x0241; disable scaling pins -->
+  <pin name="speed" scale="0" />
+  <!-- addr:0x0242; one register to bit-->
+  <pin name="ping" haltype="HAL_BIT" modbustype="U_AB" />
+  <!-- Align the next value -->
+  <pin skip="1" />
+  <!-- addr: 0x0244-0x0245; use defaults from this command -->
+  <pin name="afloat" />
 <!--
   The above <command><pin> tags read 6 registers and generate pins:
   hm2_modbus.0.speed         HAL_FLOAT (out)
@@ -563,16 +584,21 @@ attributes and can be overridden by adding them to the '<pin>' tag.
 
 Recognized '<commands>/<command>/<pin>' attributes:
 
-* 'clamp': [Boolean] The clamp setting override for this pin.
-* 'haltype': [see *HAL TYPES*] The HAL type override for this pin.
-* 'modbustype': [see *MODBUS TYPES*] The Modbus type override for this pin.
-* 'name':
+*clamp* [Boolean]::
+  The clamp setting override for this pin.
+*haltype* [see *HAL TYPES*]::
+  The HAL type override for this pin.
+*modbustype* [see *MODBUS TYPES*]::
+  The Modbus type override for this pin.
+*name*::
   Specifies the pin name overriding the default '<command>[name]-xx' sequence.
   This makes the HAL names more human readable.
-* 'scale': [Boolean] The scale setting override for this pin.
-* 'skip': [0..24] Skip a number of registers ignoring them for read functions
-  and writing zero (0) for write functions. There can not be other attributes
-  if the 'skip' attribute is used. +
+*scale* [Boolean]::
+  The scale setting override for this pin.
+*skip* [0..24]::
+  Skip a number of registers ignoring them for read functions and writing
+  zero (0) for write functions. There can not be other attributes if the 'skip'
+  attribute is used. +
   Using a 'skip' value larger than 11 will emit a warning. Large skips make the
   transfers less efficient and skipping 12+ registers may be better off by
   splitting the function in two commands. An exception may be atomicity where
