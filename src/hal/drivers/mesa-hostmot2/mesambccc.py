@@ -1419,7 +1419,7 @@ def main():
         return 1
 
     if verbose:
-        print("Default communication parameters:")
+        print("Default communication parameters and setup:")
         print("  baudrate  : {}".format(configparams['baudrate']))
         print("  parity    : {}".format(['None', 'Odd', 'Even'][configparams['parity']]))
         print("  stopbits  : {}".format(configparams['stopbits']))
@@ -1428,6 +1428,8 @@ def main():
         print("  txdelay   : {}".format(getAutoFmt(configparams['txdelay'], "bits")))
         print("  drivedelay: {} bits".format(configparams['drivedelay']))
         print("  timeout   : {}".format(getAutoFmt(configparams['timeout'], "microseconds")))
+        print("  suspend   : {}".format("true" if configparams['suspend'] else "false"))
+        print("  writeflush: {}".format("true" if configparams['writeflush'] else "false"))
 
     # Parse the nodes
     global devices
