@@ -82,11 +82,13 @@ MBCCB_FORMAT_PARITYODD_BIT = 1 # bits 1 Odd parity if set
 MBCCB_FORMAT_STOPBITS2_BIT = 2 # bit  2 0=8x1 1=8x2
 MBCCB_FORMAT_DUPLEX_BIT    = 3 # bit  3 Set for full-duplex (rx-mask off)
 MBCCB_FORMAT_SUSPEND_BIT   = 4 # bit  4 Set if state-machine starts suspended
+MBCCB_FORMAT_WFLUSH_BIT    = 5 # bit  5 Set if initial writes are suppressed
 MBCCB_FORMAT_PARITYEN      = (1 << MBCCB_FORMAT_PARITYEN_BIT)
 MBCCB_FORMAT_PARITYODD     = (1 << MBCCB_FORMAT_PARITYODD_BIT)
 MBCCB_FORMAT_STOPBITS2     = (1 << MBCCB_FORMAT_STOPBITS2_BIT)
 MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_DUPLEX_BIT)
 MBCCB_FORMAT_SUSPEND       = (1 << MBCCB_FORMAT_SUSPEND_BIT)
+MBCCB_FORMAT_WFLUSH        = (1 << MBCCB_FORMAT_WFLUSH_BIT)
 
 # Values for parity internally
 PARITY_NONE = 0
@@ -105,6 +107,7 @@ CONFIGDEFAULT= {'baudrate'  : '9600',
                 'icdelay'   : 'AUTO',
                 'interval'  : '0',
                 'suspend'   : '0',
+                'writeflush': '1',
                 'timeout'   : 'AUTO' }
 
 configparams = CONFIGDEFAULT
@@ -127,6 +130,7 @@ CONFIGLIMITS = {'baudrate'  : [1200, 1000000],
                 'icdelay'   : [0, 255], # 0 signals auto
                 'interval'  : [0, MAXINTERVAL],  # As-fast-as possible to ... seconds
                 'suspend'   : [0, 1],   # Set to start suspended
+                'writeflush': [0, 1],
                 'timeout'   : [10000, 10000000] } # 10 milliseconds to 10 seconds (can override in <command>)
 
 # XXX: Keep in sync with hal.h
@@ -297,7 +301,7 @@ MBCCB_CMDF_MASK     = 0x000f # sum of allowed normal flags
 # Allowed attributes in <mesamodbus>
 MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
                'parity',   'rxdelay',    'stopbits', 'suspend', 'timeout',
-               'txdelay' ]
+               'txdelay',  'writeflush' ]
 
 # Allowed attributes in <commands>/<command>
 CMDSATTRIB = [ 'address',     'bcanswer', 'clamp',   'count',    'delay',
@@ -516,6 +520,10 @@ def verifyConfigParams(cfg):
     # Fixup suspend boolean
     b = getBoolean(cfg, 'suspend')
     cfg['suspend'] = '1' if True == b else '0'
+
+    # Fixup writeflush boolean
+    b = getBoolean(cfg, 'writeflush')
+    cfg['writeflush'] = '1' if True == b else '0'
 
     # Set timeout to zero for auto calculation
     if 'AUTO' == cfg['timeout']:
@@ -1624,6 +1632,7 @@ def main():
     flg  = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
     flg |= MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
     flg |= MBCCB_FORMAT_SUSPEND if configparams['suspend'] else 0
+    flg |= MBCCB_FORMAT_WFLUSH if configparams['writeflush'] else 0
     header = (struct.pack(">8sIHHHHHHIIIIIIIIII",
                         b'MesaMB01',
                         configparams['baudrate'],
