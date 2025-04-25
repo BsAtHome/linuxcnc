@@ -13,7 +13,7 @@ on:
 jobs:
 
   rip-and-test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Dump GitHub context
       env:
@@ -39,7 +39,7 @@ jobs:
         eatmydata ../scripts/rip-environment runtests -p
 
   rip-and-test-clang:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Dump GitHub context
       env:
@@ -66,7 +66,7 @@ jobs:
         eatmydata ../scripts/rip-environment runtests -p
 
   htmldocs:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Dump GitHub context
       env:
