@@ -1,5 +1,5 @@
 #!/bin/sh -ex
-sudo sh -c 'echo deb-src http://us.archive.ubuntu.com/ubuntu/ xenial main universe >> /etc/apt/sources.list'
+#sudo sh -c 'echo deb-src http://us.archive.ubuntu.com/ubuntu/ xenial main universe >> /etc/apt/sources.list'
 grep . /etc/apt/sources.list /etc/apt/sources.list.d/* || true
 sudo apt-get update -qq
 sudo apt-get install -y devscripts equivs build-essential --no-install-recommends
