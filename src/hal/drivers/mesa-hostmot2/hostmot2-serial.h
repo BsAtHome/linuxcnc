@@ -78,7 +78,7 @@
  * operation mode, timing, and status
  * Bit  30     RO BadPop Error (read data FIFO with no data) RO
  * Bits 29..22 RW RX data digital filter (in ClockLow periods)
- * 	          Should be set to 1/2 bit time
+ *                Should be set to 1/2 bit time
  *                (or max=255 if it cannot be set long enough)
  * Bit  21     RO FrameBuffer has data
  * Bit  20     WO Scale inter-frame delay by 4 (0=x1, 1=x4) (V3+)
@@ -174,15 +174,15 @@ typedef struct {
     rtapi_u32 unused[3];  // Future proof, probably
 } hm2_pktuart_config_t;
 
-#define HM2_PKTUART_CONFIG_DRIVEEN	0x0001	// TX-only Output driver enable
-#define HM2_PKTUART_CONFIG_DRIVEAUTO	0x0002	// TX-only Output drive auto-on on send
-#define HM2_PKTUART_CONFIG_RXEN		0x0010	// RX-only Receiver enable
-#define HM2_PKTUART_CONFIG_RXMASKEN	0x0020	// RX-only Receiver masked when sending (half-duplex)
-#define HM2_PKTUART_CONFIG_PARITYEN	0x0100	// RX+TX Parity enable
-#define HM2_PKTUART_CONFIG_PARITYODD	0x0200	// RX+TX Parity Odd (even when unset and parity enabled)
-#define HM2_PKTUART_CONFIG_STOPBITS2	0x0400	// RX+TX Set two stopbits (V3+)
-#define HM2_PKTUART_CONFIG_FLUSH	0x4000	// RX+TX flag (flush fifo and count regs)
-#define HM2_PKTUART_CONFIG_FORCECONFIG	0x8000	// RX+TX Always write the config to the board, even when not changed
+#define HM2_PKTUART_CONFIG_DRIVEEN      0x0001  // TX-only Output driver enable
+#define HM2_PKTUART_CONFIG_DRIVEAUTO    0x0002  // TX-only Output drive auto-on on send
+#define HM2_PKTUART_CONFIG_RXEN         0x0010  // RX-only Receiver enable
+#define HM2_PKTUART_CONFIG_RXMASKEN     0x0020  // RX-only Receiver masked when sending (half-duplex)
+#define HM2_PKTUART_CONFIG_PARITYEN     0x0100  // RX+TX Parity enable
+#define HM2_PKTUART_CONFIG_PARITYODD    0x0200  // RX+TX Parity Odd (even when unset and parity enabled)
+#define HM2_PKTUART_CONFIG_STOPBITS2    0x0400  // RX+TX Set two stopbits (V3+)
+#define HM2_PKTUART_CONFIG_FLUSH        0x4000  // RX+TX flag (flush fifo and count regs)
+#define HM2_PKTUART_CONFIG_FORCECONFIG  0x8000  // RX+TX Always write the config to the board, even when not changed
 
 // hm2_pktuart_config() replaces previous pktuart serial setup functions
 // Changes can now be done without changing the prototype
