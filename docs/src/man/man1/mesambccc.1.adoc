@@ -323,14 +323,14 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   This may be required for flaky devices. Default false.
 
 
-===== Delay instruction
+==== Delay instruction
 Recognized '<initlist>/<command>' attributes in delay commands:
 
 *delay* [0..60000000]::
   Communication will be suspended by 'delay' micro-seconds.
 
 
-===== Communication parameter change
+==== Communication parameter change
 Communication parameters may be temporarily changed to perform live setup of
 Modbus devices to change their own communication parameters. Some devices will
 start with a fixed rate and must be reprogrammed at start to change to a
@@ -355,7 +355,7 @@ attributes:
   Communication number of stopbits override.
 
 
-===== Initialization data
+==== Initialization data
 Recognized '<initlist>/<command>/<data>' attributes:
 
 *modbustype* [see *MODBUS TYPE*]::
@@ -564,7 +564,7 @@ Recognized '<commands>/<command>' attributes:
   The override the 'writeflush' value. See '<mesamodbus>[writeflush]' for
   details. Default '<mesamodbus>[writeflush]'.
 
-===== Pins
+==== Pins
 Defining '<pin>' tags allows for custom naming schemes and allows reducing read
 and write function overhead. Using '<pin>' tags enables you to combine
 different 'modbustype' and 'haltype' values to be read or written to or from
