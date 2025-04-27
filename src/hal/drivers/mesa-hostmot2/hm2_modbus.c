@@ -191,15 +191,24 @@ typedef union {
 } mb_types64_u;
 
 typedef struct {
-	hal_data_u **pins;	// All Modbus data pins
-	hal_float_t **scales;	// All HAL pin scales
-	hal_data_u **offsets;	// All HAL pin offsets
-	hal_float_t **scaleds;	// All HAL pin scaled outputs
-	hal_bit_t **cmddisableds; // Command disable
-	hal_u32_t **cmderrors;	// Command error counters
-	hal_u32_t **cmderrcodes; // Last error code
+	hal_data_u	*pin;		// Modbus data pin
+	hal_data_u	*offset;	// Pin offset input
+	hal_float_t *scale;		// Pin scale input
+	hal_float_t	*scaled;	// Pin scaled output
+} mbt_pin_hal_t;
+
+typedef struct {
+	hal_bit_t *disabled;	// Command disable
+	hal_bit_t *reset;		// Reset errors and re-enable on rising edge
+	hal_u32_t *error;		// Command error counter
+	hal_u32_t *errorcode;	// Last error code
+} mbt_cmd_hal_t;
+
+typedef struct {
+	mbt_pin_hal_t *pins;	// All data pins
+	mbt_cmd_hal_t *cmds;	// Per command pins
 	hal_bit_t *suspend;		// Suspend running commands
-	hal_bit_t *reset;		// Reset command errors on rising edge
+	hal_bit_t *reset;		// Reset command errors and re-enable on rising edge
 	hal_bit_t *fault;
 	hal_u32_t *faultcmd;
 	hal_u32_t *lasterror;
@@ -220,7 +229,8 @@ typedef struct {
 	hm2_modbus_mbccb_type_t *typeptr;	// The types for this command
 	rtapi_s64	interval;			// The running interval of this command
 	int pinref;		// What pin to start with
-	int disabled;	// Skipped if set
+	bool disabled;	// Skipped if set
+	bool prevreset;	// To track the rising edge
 	int errors;		// Count the errors
 	int datalen;	// Number of bytes in 'data' buffer
 	rtapi_u8 data[MAX_PKT_LEN]; // PDU: 2-byte header, MAX_MSG_LEN payload, 2-byte CRC
@@ -449,10 +459,10 @@ static void set_error(hm2_modbus_inst_t *inst, int errcode)
 	hm2_modbus_cmd_t *cc = current_cmd(inst);
 	if(++cc->errors >= MAX_ERRORS || cc->disabled) {
 		cc->disabled = 1;
-		*(inst->hal->cmddisableds[inst->cmdidx]) = cc->disabled;
-		*(inst->hal->cmderrcodes[inst->cmdidx])  = errcode;
+		*(inst->hal->cmds[inst->cmdidx].disabled)  = cc->disabled;
+		*(inst->hal->cmds[inst->cmdidx].errorcode) = errcode;
 	}
-	*(inst->hal->cmderrors[inst->cmdidx]) = cc->errors;
+	*(inst->hal->cmds[inst->cmdidx].error) = cc->errors;
 }
 
 //
@@ -522,6 +532,21 @@ static inline int next_command(hm2_modbus_inst_t *inst)
 	// Find the next non-disabled command
 	do {
 		inst->cmdidx++;
+
+		// Reset the individual commands on request.
+		// Using modulo index ensures we also reset index zero when we wrap.
+		unsigned i = inst->cmdidx % inst->ncmds;
+		bool b = !!*(inst->hal->cmds[i].reset);
+		if(inst->cmds[i].prevreset != b) {
+			inst->cmds[i].prevreset = !inst->cmds[i].prevreset;
+			if(inst->cmds[i].prevreset) {
+				inst->cmds[i].disabled = 0;
+				inst->cmds[i].errors   = 0;
+				*(inst->hal->cmds[i].disabled)  = 0;
+				*(inst->hal->cmds[i].error)     = 0;
+				*(inst->hal->cmds[i].errorcode) = 0;
+			}
+		}
 	} while(inst->cmdidx < inst->ncmds && inst->cmds[inst->cmdidx].disabled);
 
 	if(inst->cmdidx >= inst->ncmds) {
@@ -635,12 +660,16 @@ static void write_flush(hm2_modbus_inst_t *inst)
 		// set, then we still want timed out writes that are disabled, and
 		// re-enabled due to a reset, to adhere to the flush setting when they
 		// suddenly no longer timeout.
+		if(!(cc->cmd.flags & MBCCB_CMDF_WFLUSH))	// Must have flag set
+			continue;
 		int r = build_data_frame(inst);
 		if(r < 0) {
 			// We cannot recover from data frames that cannot be build. They
 			// would always result in the same error.
-			MSG_ERR("%s: error: Build data frame failed in write_flush for command %d, disabling\n", inst->name, inst->cmdidx);
-			cc->disabled = 1;
+			if(!cc->disabled) {
+				MSG_ERR("%s: error: Build data frame failed in write_flush for command %d, disabling\n", inst->name, inst->cmdidx);
+				cc->disabled = 1;
+			}
 			set_error(inst, -r);
 		}
 	}
@@ -671,8 +700,7 @@ static void process(void *arg, long period)
 			inst->suspended = 0;
 			// When coming out of suspend, see if we want to suppress writes
 			// because our local data will most likely not match the pin data.
-			if(inst->mbccb->format & MBCCB_FORMAT_WFLUSH)
-				write_flush(inst);
+			write_flush(inst);
 		} else {
 			return;
 		}
@@ -686,12 +714,14 @@ static void process(void *arg, long period)
 
 	if(inst->cmds == inst->_cmds) {
 		// Only count timeout when running the command list
-		for(unsigned i = 0; i < inst->ncmds; i++)
+		for(unsigned i = 0; i < inst->ncmds; i++) {
 			inst->cmds[i].interval -= period;	// Keep counting nanoseconds
+		}
 	}
-	inst->timeout  -= period;
 
-	// Re-enable all commands on rising edge of reset pin
+	inst->timeout  -= period;	// Current timeout count
+
+	// Re-enable all commands on rising edge of global reset pin
 	bool b = !!*(inst->hal->reset);	// Make sure its value is bool-worthy
 	if(inst->prevreset != b) {
 		inst->prevreset = !inst->prevreset;
@@ -699,9 +729,9 @@ static void process(void *arg, long period)
 			for(unsigned i = 0; i < inst->ncmds; i++) {
 				inst->cmds[i].disabled = 0;
 				inst->cmds[i].errors = 0;
-				*(inst->hal->cmddisableds[i]) = 0;
-				*(inst->hal->cmderrors[i])    = 0;
-				*(inst->hal->cmderrcodes[i])  = 0;
+				*(inst->hal->cmds[i].disabled)  = 0;
+				*(inst->hal->cmds[i].error)     = 0;
+				*(inst->hal->cmds[i].errorcode) = 0;
 			}
 		}
 	}
@@ -956,12 +986,13 @@ fetch_more_data:
 			inst->frameidx, inst->fsizes[0], inst->fsizes[1], inst->fsizes[2], inst->fsizes[3]);
 #endif
 		frsize = inst->fsizes[inst->frameidx];
-		if(frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT)) {
+		if(frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT | HM2_PKTUART_RCR_ERRORPARITY)) {
 			const char *eor = (frsize & HM2_PKTUART_RCR_ERROROVERRUN)  ? " OVERRUN"  : "";
 			const char *esb = (frsize & HM2_PKTUART_RCR_ERRORSTARTBIT) ? " STARTBIT" : "";
-			MSG_WARN("%s: warning: reply to command %u had an error%s%s set in fsize (0x%04x), dropping\n",
-					inst->name, inst->cmdidx, eor, esb,
-					frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT));
+			const char *epa = (frsize & HM2_PKTUART_RCR_ERRORPARITY)   ? " PARITY"   : "";
+			MSG_WARN("%s: warning: reply to command %u had an error%s%s%s set in fsize (0x%04x), dropping\n",
+					inst->name, inst->cmdidx, eor, esb, epa,
+					frsize & (HM2_PKTUART_RCR_ERROROVERRUN | HM2_PKTUART_RCR_ERRORSTARTBIT | HM2_PKTUART_RCR_ERRORPARITY));
 			set_error(inst, EIO);
 			force_resend(inst);
 			queue_reset(inst);
@@ -1361,38 +1392,38 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		break;
 	case MBCMD_W_COIL: // Write single coil
 		CHK_RV(ch_append16(cc, cc->cmd.caddr));
-		CHK_RV(ch_append16(cc, hal->pins[p]->b ? 0xFF00 : 0x0000));
+		CHK_RV(ch_append16(cc, hal->pins[p].pin->b ? 0xFF00 : 0x0000));
 		break;
 	case MBCMD_W_REGISTER: // Write single register
 		// The target mtype can only be MBT_AB or MBT_BA (single reg write)
 		CHK_RV(ch_append16(cc, cc->cmd.caddr));
 		switch(cc->typeptr[0].htype) {
 		case HAL_BIT:
-			map_u(cc, hal->pins[p]->b ? 1 : 0, 0);
+			map_u(cc, hal->pins[p].pin->b ? 1 : 0, 0);
 			break;
 		case HAL_U32:
 			switch(mtypetype(cc->typeptr[0].mtype)) {
-			case MBT_U: map_u(cc, hal->pins[p]->u, 0); break;
-			case MBT_S: map_s(cc, map_us(hal->pins[p]->u), 0); break;
-			case MBT_F: map_f(cc, map_uf(hal->pins[p]->u), 0); break;
+			case MBT_U: map_u(cc, hal->pins[p].pin->u, 0); break;
+			case MBT_S: map_s(cc, map_us(hal->pins[p].pin->u), 0); break;
+			case MBT_F: map_f(cc, map_uf(hal->pins[p].pin->u), 0); break;
 			}
 			break;
 		case HAL_U64:
 			switch(mtypetype(cc->typeptr[0].mtype)) {
-			case MBT_U: map_u(cc, hal->pins[p]->lu, 0); break;
-			case MBT_S: map_s(cc, map_us(hal->pins[p]->lu), 0); break;
-			case MBT_F: map_f(cc, map_uf(hal->pins[p]->lu), 0); break;
+			case MBT_U: map_u(cc, hal->pins[p].pin->lu, 0); break;
+			case MBT_S: map_s(cc, map_us(hal->pins[p].pin->lu), 0); break;
+			case MBT_F: map_f(cc, map_uf(hal->pins[p].pin->lu), 0); break;
 			}
 			break;
 		case HAL_S32:
 			if(!haspinscale(&cc->typeptr[0])) {
 				switch(mtypetype(cc->typeptr[0].mtype)) {
-				case MBT_U: map_u(cc, map_su(hal->pins[p]->s), 0); break;
-				case MBT_S: map_s(cc, hal->pins[p]->s, 0); break;
-				case MBT_F: map_f(cc, map_sf(hal->pins[p]->s), 0); break;
+				case MBT_U: map_u(cc, map_su(hal->pins[p].pin->s), 0); break;
+				case MBT_S: map_s(cc, hal->pins[p].pin->s, 0); break;
+				case MBT_F: map_f(cc, map_sf(hal->pins[p].pin->s), 0); break;
 				}
 			} else {
-				val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * *(hal->scales[p]);
+				val64.f = (real_t)((rtapi_s64)hal->pins[p].pin->s - hal->pins[p].offset->s) * *(hal->pins[p].scale);
 				switch(mtypetype(cc->typeptr[0].mtype)) {
 				case MBT_U: map_u(cc, map_fu(val64.f), 0); break;
 				case MBT_S: map_s(cc, map_fs(val64.f), 0); break;
@@ -1403,12 +1434,12 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		case HAL_S64:
 			if(!haspinscale(&cc->typeptr[0])) {
 				switch(mtypetype(cc->typeptr[0].mtype)) {
-				case MBT_U: map_u(cc, map_su(hal->pins[p]->ls), 0); break;
-				case MBT_S: map_s(cc, hal->pins[p]->ls, 0); break;
-				case MBT_F: map_f(cc, map_sf(hal->pins[p]->ls), 0); break;
+				case MBT_U: map_u(cc, map_su(hal->pins[p].pin->ls), 0); break;
+				case MBT_S: map_s(cc, hal->pins[p].pin->ls, 0); break;
+				case MBT_F: map_f(cc, map_sf(hal->pins[p].pin->ls), 0); break;
 				}
 			} else {
-				val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * *(hal->scales[p]);
+				val64.f = (real_t)(hal->pins[p].pin->ls - hal->pins[p].offset->ls) * *(hal->pins[p].scale);
 				switch(mtypetype(cc->typeptr[0].mtype)) {
 				case MBT_U: map_u(cc, map_fu(val64.f), 0); break;
 				case MBT_S: map_s(cc, map_fs(val64.f), 0); break;
@@ -1419,12 +1450,12 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		case HAL_FLOAT:
 			if(!haspinscale(&cc->typeptr[0])) {
 				switch(mtypetype(cc->typeptr[0].mtype)) {
-				case MBT_U: map_u(cc, map_fu(hal->pins[p]->f), 0); break;
-				case MBT_S: map_s(cc, map_fs(hal->pins[p]->f), 0); break;
-				case MBT_F: map_f(cc, hal->pins[p]->f, 0); break;
+				case MBT_U: map_u(cc, map_fu(hal->pins[p].pin->f), 0); break;
+				case MBT_S: map_s(cc, map_fs(hal->pins[p].pin->f), 0); break;
+				case MBT_F: map_f(cc, hal->pins[p].pin->f, 0); break;
 				}
 			} else {
-				val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * *(hal->scales[p]);
+				val64.f = (hal->pins[p].pin->f - hal->pins[p].offset->f) * *(hal->pins[p].scale);
 				switch(mtypetype(cc->typeptr[0].mtype)) {
 				case MBT_U: map_u(cc, map_fu(val64.f), 0); break;
 				case MBT_S: map_s(cc, map_fs(val64.f), 0); break;
@@ -1442,7 +1473,7 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 		CHK_RV(ch_append16(cc, cc->cmd.cpincnt));
 		CHK_RV(ch_append8(cc, (cc->cmd.cpincnt + 7) / 8));
 		for(unsigned i = 0; i < cc->cmd.cpincnt; i++) {
-			if(hal->pins[p++]->b)
+			if(hal->pins[p++].pin->b)
 				acc |= 1u << (i % 8);
 			if((i % 8) == 7 || i == cc->cmd.cpincnt - 1u) { // time for the next byte
 				CHK_RV(ch_append8(cc, acc));
@@ -1464,31 +1495,31 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 			}
 			switch(cc->typeptr[i].htype) {
 			case HAL_BIT:
-				map_u(cc, hal->pins[p]->b ? 1 : 0, i);
+				map_u(cc, hal->pins[p].pin->b ? 1 : 0, i);
 				break;
 			case HAL_U32:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U: map_u(cc, hal->pins[p]->u, i); break;
-				case MBT_S: map_s(cc, map_us(hal->pins[p]->u), i); break;
-				case MBT_F: map_f(cc, map_uf(hal->pins[p]->u), i); break;
+				case MBT_U: map_u(cc, hal->pins[p].pin->u, i); break;
+				case MBT_S: map_s(cc, map_us(hal->pins[p].pin->u), i); break;
+				case MBT_F: map_f(cc, map_uf(hal->pins[p].pin->u), i); break;
 				}
 				break;
 			case HAL_U64:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U: map_u(cc, hal->pins[p]->lu, i); break;
-				case MBT_S: map_s(cc, map_us(hal->pins[p]->lu), i); break;
-				case MBT_F: map_f(cc, map_uf(hal->pins[p]->lu), i); break;
+				case MBT_U: map_u(cc, hal->pins[p].pin->lu, i); break;
+				case MBT_S: map_s(cc, map_us(hal->pins[p].pin->lu), i); break;
+				case MBT_F: map_f(cc, map_uf(hal->pins[p].pin->lu), i); break;
 				}
 				break;
 			case HAL_S32:
 				if(!haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U: map_u(cc, map_su(hal->pins[p]->s), i); break;
-					case MBT_S: map_s(cc, hal->pins[p]->s, i); break;
-					case MBT_F: map_f(cc, map_sf(hal->pins[p]->s), i); break;
+					case MBT_U: map_u(cc, map_su(hal->pins[p].pin->s), i); break;
+					case MBT_S: map_s(cc, hal->pins[p].pin->s, i); break;
+					case MBT_F: map_f(cc, map_sf(hal->pins[p].pin->s), i); break;
 					}
 				} else {
-					val64.f = (real_t)((rtapi_s64)hal->pins[p]->s - hal->offsets[p]->s) * *(hal->scales[p]);
+					val64.f = (real_t)((rtapi_s64)hal->pins[p].pin->s - hal->pins[p].offset->s) * *(hal->pins[p].scale);
 					switch(mtypetype(cc->typeptr[i].mtype)) {
 					case MBT_U: map_u(cc, map_fu(val64.f), i); break;
 					case MBT_S: map_s(cc, map_fs(val64.f), i); break;
@@ -1499,12 +1530,12 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 			case HAL_S64:
 				if(!haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U: map_u(cc, map_su(hal->pins[p]->ls), i); break;
-					case MBT_S: map_s(cc, hal->pins[p]->ls, i); break;
-					case MBT_F: map_f(cc, map_sf(hal->pins[p]->ls), i); break;
+					case MBT_U: map_u(cc, map_su(hal->pins[p].pin->ls), i); break;
+					case MBT_S: map_s(cc, hal->pins[p].pin->ls, i); break;
+					case MBT_F: map_f(cc, map_sf(hal->pins[p].pin->ls), i); break;
 					}
 				} else {
-					val64.f = (real_t)(hal->pins[p]->ls - hal->offsets[p]->ls) * *(hal->scales[p]);
+					val64.f = (real_t)(hal->pins[p].pin->ls - hal->pins[p].offset->ls) * *(hal->pins[p].scale);
 					switch(mtypetype(cc->typeptr[i].mtype)) {
 					case MBT_U: map_u(cc, map_fu(val64.f), i); break;
 					case MBT_S: map_s(cc, map_fs(val64.f), i); break;
@@ -1515,12 +1546,12 @@ static int build_data_frame(hm2_modbus_inst_t *inst)
 			case HAL_FLOAT:
 				if(!haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U: map_u(cc, map_fu(hal->pins[p]->f), i); break;
-					case MBT_S: map_s(cc, map_fs(hal->pins[p]->f), i); break;
-					case MBT_F: map_f(cc, hal->pins[p]->f, i); break;
+					case MBT_U: map_u(cc, map_fu(hal->pins[p].pin->f), i); break;
+					case MBT_S: map_s(cc, map_fs(hal->pins[p].pin->f), i); break;
+					case MBT_F: map_f(cc, hal->pins[p].pin->f, i); break;
 					}
 				} else {
-					val64.f = (hal->pins[p]->f - hal->offsets[p]->f) * *(hal->scales[p]);
+					val64.f = (hal->pins[p].pin->f - hal->pins[p].offset->f) * *(hal->pins[p].scale);
 					switch(mtypetype(cc->typeptr[i].mtype)) {
 					case MBT_U: map_u(cc, map_fu(val64.f), i); break;
 					case MBT_S: map_s(cc, map_fs(val64.f), i); break;
@@ -1752,7 +1783,7 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 		w = 3;	// First data return byte {mbid, func, bytecount, ...}
 		b = 0;
 		for(unsigned i = 0; i < cc->cmd.cpincnt; i++) {
-			hal->pins[p++]->b = !!(bytes[w] & (1u << b));
+			hal->pins[p++].pin->b = !!(bytes[w] & (1u << b));
 			if(++b >= 8) { b = 0; w++; }
 		}
 		break;
@@ -1847,61 +1878,61 @@ static int parse_data_frame(hm2_modbus_inst_t *inst)
 
 			switch(cc->typeptr[i].htype) {
 			case HAL_BIT:
-				hal->pins[p]->b = 0 != val64.u;	// Zero maps to false, anything else to true
+				hal->pins[p].pin->b = 0 != val64.u;	// Zero maps to false, anything else to true
 				break;
 			case HAL_U32:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U:	hal->pins[p]->u = unmap32_uu(cc, val64.u, i); break;
-				case MBT_S:	hal->pins[p]->u = unmap32_us(cc, val64.s, i); break;
-				case MBT_F:	hal->pins[p]->u = unmap32_uf(cc, val64.f, i); break;
+				case MBT_U:	hal->pins[p].pin->u = unmap32_uu(cc, val64.u, i); break;
+				case MBT_S:	hal->pins[p].pin->u = unmap32_us(cc, val64.s, i); break;
+				case MBT_F:	hal->pins[p].pin->u = unmap32_uf(cc, val64.f, i); break;
 				}
 				break;
 			case HAL_S32:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U:	hal->pins[p]->s = unmap32_su(cc, val64.u, i); break;
-				case MBT_S:	hal->pins[p]->s = unmap32_ss(cc, val64.s, i); break;
-				case MBT_F:	hal->pins[p]->s = unmap32_sf(cc, val64.f, i); break;
+				case MBT_U:	hal->pins[p].pin->s = unmap32_su(cc, val64.u, i); break;
+				case MBT_S:	hal->pins[p].pin->s = unmap32_ss(cc, val64.s, i); break;
+				case MBT_F:	hal->pins[p].pin->s = unmap32_sf(cc, val64.f, i); break;
 				}
 				if(haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
-					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
-					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
+					case MBT_U:	*(hal->pins[p].scaled) = (real_t)(rtapi_s64)(val64.u - hal->pins[p].offset->lu) * *(hal->pins[p].scale); break;
+					case MBT_S:	*(hal->pins[p].scaled) = (real_t)(val64.s - hal->pins[p].offset->ls) * *(hal->pins[p].scale); break;
+					case MBT_F:	*(hal->pins[p].scaled) = (val64.f - hal->pins[p].offset->f) * *(hal->pins[p].scale); break;
 					}
 				}
 				break;
 			case HAL_U64:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U:	hal->pins[p]->lu = val64.u; break;
-				case MBT_S:	hal->pins[p]->lu = unmap64_us(cc, val64.s, i); break;
-				case MBT_F:	hal->pins[p]->lu = unmap64_uf(cc, val64.f, i); break;
+				case MBT_U:	hal->pins[p].pin->lu = val64.u; break;
+				case MBT_S:	hal->pins[p].pin->lu = unmap64_us(cc, val64.s, i); break;
+				case MBT_F:	hal->pins[p].pin->lu = unmap64_uf(cc, val64.f, i); break;
 				}
 				break;
 			case HAL_S64:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U:	hal->pins[p]->ls = unmap64_su(cc, val64.u, i); break;
-				case MBT_S:	hal->pins[p]->ls = val64.s; break;
-				case MBT_F:	hal->pins[p]->ls = unmap64_sf(cc, val64.f, i); break;
+				case MBT_U:	hal->pins[p].pin->ls = unmap64_su(cc, val64.u, i); break;
+				case MBT_S:	hal->pins[p].pin->ls = val64.s; break;
+				case MBT_F:	hal->pins[p].pin->ls = unmap64_sf(cc, val64.f, i); break;
 				}
 				if(haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
-					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
-					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
+					case MBT_U:	*(hal->pins[p].scaled) = (real_t)(rtapi_s64)(val64.u - hal->pins[p].offset->lu) * *(hal->pins[p].scale); break;
+					case MBT_S:	*(hal->pins[p].scaled) = (real_t)(val64.s - hal->pins[p].offset->ls) * *(hal->pins[p].scale); break;
+					case MBT_F:	*(hal->pins[p].scaled) = (val64.f - hal->pins[p].offset->f) * *(hal->pins[p].scale); break;
 					}
 				}
 				break;
 			case HAL_FLOAT:
 				switch(mtypetype(cc->typeptr[i].mtype)) {
-				case MBT_U:	hal->pins[p]->f = val64.u; break;
-				case MBT_S:	hal->pins[p]->f = val64.s; break;
-				case MBT_F:	hal->pins[p]->f = val64.f; break;
+				case MBT_U:	hal->pins[p].pin->f = val64.u; break;
+				case MBT_S:	hal->pins[p].pin->f = val64.s; break;
+				case MBT_F:	hal->pins[p].pin->f = val64.f; break;
 				}
 				if(haspinscale(&cc->typeptr[i])) {
 					switch(mtypetype(cc->typeptr[i].mtype)) {
-					case MBT_U:	*(hal->scaleds[p]) = (real_t)(rtapi_s64)(val64.u - hal->offsets[p]->lu) * *(hal->scales[p]); break;
-					case MBT_S:	*(hal->scaleds[p]) = (real_t)(val64.s - hal->offsets[p]->ls) * *(hal->scales[p]); break;
-					case MBT_F:	*(hal->scaleds[p]) = (val64.f - hal->offsets[p]->f) * *(hal->scales[p]); break;
+					case MBT_U:	*(hal->pins[p].scaled) = (real_t)(rtapi_s64)(val64.u - hal->pins[p].offset->lu) * *(hal->pins[p].scale); break;
+					case MBT_S:	*(hal->pins[p].scaled) = (real_t)(val64.s - hal->pins[p].offset->ls) * *(hal->pins[p].scale); break;
+					case MBT_F:	*(hal->pins[p].scaled) = (val64.f - hal->pins[p].offset->f) * *(hal->pins[p].scale); break;
 					}
 				}
 				break;
@@ -2618,38 +2649,13 @@ int rtapi_app_main(void)
 			retval = -ENOMEM;
 			goto errout;
 		}
-		if(!(inst->hal->pins = (hal_data_u **)hal_malloc(inst->npins * sizeof(*inst->hal->pins)))) {
+		if(!(inst->hal->pins = (mbt_pin_hal_t *)hal_malloc(inst->npins * sizeof(*inst->hal->pins)))) {
 			MSG_ERR("%s: error: Failed to allocate HAL pins memory\n", inst->name);
 			retval = -ENOMEM;
 			goto errout;
 		}
-		if(!(inst->hal->scales = (hal_float_t **)hal_malloc(inst->npins * sizeof(*inst->hal->scales)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL scales memory\n", inst->name);
-			retval = -ENOMEM;
-			goto errout;
-		}
-		if(!(inst->hal->offsets = (hal_data_u **)hal_malloc(inst->npins * sizeof(*inst->hal->offsets)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL offsets memory\n", inst->name);
-			retval = -ENOMEM;
-			goto errout;
-		}
-		if(!(inst->hal->scaleds = (hal_float_t **)hal_malloc(inst->npins * sizeof(*inst->hal->scaleds)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL scaleds memory\n", inst->name);
-			retval = -ENOMEM;
-			goto errout;
-		}
-		if(!(inst->hal->cmddisableds = (hal_bit_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmddisableds)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL cmddisableds memory\n", inst->name);
-			retval = -ENOMEM;
-			goto errout;
-		}
-		if(!(inst->hal->cmderrors = (hal_u32_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmderrors)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL cmderrors memory\n", inst->name);
-			retval = -ENOMEM;
-			goto errout;
-		}
-		if(!(inst->hal->cmderrcodes = (hal_u32_t **)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmderrcodes)))) {
-			MSG_ERR("%s: error: Failed to allocate HAL cmderrcodes memory\n", inst->name);
+		if(!(inst->hal->cmds = (mbt_cmd_hal_t *)hal_malloc(inst->ncmds * sizeof(*inst->hal->cmds)))) {
+			MSG_ERR("%s: error: Failed to allocate HAL cmds memory\n", inst->name);
 			retval = -ENOMEM;
 			goto errout;
 		}
@@ -2760,6 +2766,11 @@ int rtapi_app_main(void)
 		// extended inter-frame length setting and no max. inter-character
 		// timing measurement.
 		if(inst->rxversion < 3 || inst->txversion < 3) {
+			if(inst->rxversion < 2 || inst->txversion < 2) {
+				MSG_ERR("%s: error: The driver does not support PktUART versions before 2 (Rx=%u Tx=%u), aborting.\n",
+						inst->name, inst->rxversion, inst->txversion);
+				goto errout;
+			}
 			MSG_WARN("%s: warning: PktUART version is less than 3 (Rx=%u Tx=%u). Please consider upgrading.\n",
 					inst->name, inst->rxversion, inst->txversion);
 			if(stopbits > 1) {
@@ -2819,12 +2830,14 @@ int rtapi_app_main(void)
 #define CPTR(x)	((const char *)((x) + 1))
 		for(unsigned c = 0; c < inst->ncmds; c++) {
 			// First create command status pins
-			CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->cmddisableds[c]),
+			CHECK(hal_pin_bit_newf(HAL_OUT, &(inst->hal->cmds[c].disabled),
 					comp_id, "%s.command.%02d.disabled", inst->name, c));
-			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmderrors[c]),
+			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmds[c].error),
 					comp_id, "%s.command.%02d.errors", inst->name, c));
-			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmderrcodes[c]),
+			CHECK(hal_pin_u32_newf(HAL_OUT, &(inst->hal->cmds[c].errorcode),
 					comp_id, "%s.command.%02d.error-code", inst->name, c));
+			CHECK(hal_pin_bit_newf(HAL_IN, &(inst->hal->cmds[c].reset),
+					comp_id, "%s.command.%02d.reset", inst->name, c));
 
 			// Now create the pins associated with the command
 			hm2_modbus_cmd_t *cmd = &inst->_cmds[c];
@@ -2870,28 +2883,28 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_s32_newf(dir, (hal_s32_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(haspinscale(&cmd->typeptr[j])) {
-							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							*(inst->hal->scales[p]) = 1.0;
+							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->typeptr[j].mtype)) {
 								case MBT_U:
-									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
-									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
-									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
 							} else {
-								CHECK(hal_pin_s32_newf(HAL_IN, (hal_s32_t**)&(inst->hal->offsets[p]),
+								CHECK(hal_pin_s32_newf(HAL_IN, (hal_s32_t**)&(inst->hal->pins[p].offset),
 										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
 						}
@@ -2901,28 +2914,28 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_s64_newf(dir, (hal_s64_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(haspinscale(&cmd->typeptr[j])) {
-							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							*(inst->hal->scales[p]) = 1.0;
+							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->typeptr[j].mtype)) {
 								case MBT_U:
-									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
-									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
-									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
 							} else {
-								CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
+								CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->pins[p].offset),
 										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
 						}
@@ -2932,31 +2945,31 @@ int rtapi_app_main(void)
 						CHECK(hal_pin_float_newf(dir, (hal_float_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
 						if(haspinscale(&cmd->typeptr[j])) {
-							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->scales[p]),
+							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
-							*(inst->hal->scales[p]) = 1.0;
+							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
-								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->scaleds[p]),
+								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
 								switch(mtypetype(cmd->typeptr[j].mtype)) {
 								case MBT_U:
-									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_S:
-									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_s64_newf(HAL_IN, (hal_s64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								case MBT_F:
-									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
+									CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 									break;
 								}
 							} else {
-								CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->offsets[p]),
+								CHECK(hal_pin_float_newf(HAL_IN, (hal_float_t**)&(inst->hal->pins[p].offset),
 										comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
 							}
-							inst->hal->offsets[p]->f = 0.0;
+							inst->hal->pins[p].offset->f = 0.0;
 						}
 						p++;
 						break;

@@ -15,13 +15,11 @@
 #define MBCCB_FORMAT_STOPBITS2_BIT    2 // bit  2 0=8x1 1=8x2
 #define MBCCB_FORMAT_DUPLEX_BIT       3 // bit  3 Set for full-duplex (rx-mask off)
 #define MBCCB_FORMAT_SUSPEND_BIT      4 // bit  4 Set if state-machine starts suspended
-#define MBCCB_FORMAT_WFLUSH_BIT       5 // bit  5 Set if initial writes are suppressed
 #define MBCCB_FORMAT_PARITYEN         (1u << MBCCB_FORMAT_PARITYEN_BIT)
 #define MBCCB_FORMAT_PARITYODD        (1u << MBCCB_FORMAT_PARITYODD_BIT)
 #define MBCCB_FORMAT_STOPBITS2        (1u << MBCCB_FORMAT_STOPBITS2_BIT)
 #define MBCCB_FORMAT_DUPLEX           (1u << MBCCB_FORMAT_DUPLEX_BIT)
 #define MBCCB_FORMAT_SUSPEND          (1u << MBCCB_FORMAT_SUSPEND_BIT)
-#define MBCCB_FORMAT_WFLUSH           (1u << MBCCB_FORMAT_WFLUSH_BIT)
 
 // XXX: keep in sync with mesamodbus.py
 // Max one minute delay between init commands (in microseconds)
@@ -86,11 +84,12 @@ typedef struct {
 #define MBCCB_CMDF_BCANSWER  0x0002	// Broadcasts will get an answer, ignore it
 #define MBCCB_CMDF_NOANSWER  0x0004	// Don't expect an answer
 #define MBCCB_CMDF_RESEND    0x0008	// Resend the write even if no pins are changed
+#define MBCCB_CMDF_WFLUSH    0x0010 // Don't write initial pin values but flush the output
 #define MBCCB_CMDF_PARITYEN  0x0100	// Init-only parity change
 #define MBCCB_CMDF_PARITYODD 0x0200	// Init-only parity change
 #define MBCCB_CMDF_STOPBITS2 0x0400	// Init-only stopbits change
 #define MBCCB_CMDF_INITMASK  0x0707	// sum of allowed flags in init
-#define MBCCB_CMDF_MASK      0x000f	// sum of all above flags
+#define MBCCB_CMDF_MASK      0x001f	// sum of allowed normal command flags
 
 // Type mapping for pins/PDU register data
 // Only for R_INPUTREGS, R_REGISTERS and W_REGISTERS

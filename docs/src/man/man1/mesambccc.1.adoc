@@ -62,21 +62,21 @@ to the acceptable range.
 === MODBUS FUNCTIONS
 A subset of the Modbus functions is supported (with function number in parentheses):
 
-* `R_COILS`(1):
+* `R_COILS` (`1`):
   Maps to 1..2000 HAL output pins of type 'HAL_BIT'.
-* `R_INPUTS`(2):
+* `R_INPUTS` (`2`):
   Maps to 1..2000 HAL output pins of type 'HAL_BIT'.
-* `R_REGISTERS`(3):
+* `R_REGISTERS` (`3`):
   Maps to 1..125 HAL output pins depending 'haltype' and 'scale' attributes.
-* `R_INPUTREGS`(4):
+* `R_INPUTREGS` (`4`):
   Maps to 1..125 HAL output pins depending 'haltype' and 'scale' attributes.
-* `W_COIL`(5):
+* `W_COIL` (`5`):
   Maps to single HAL input pin of type 'HAL_BIT'.
-* `W_REGISTER`(6):
+* `W_REGISTER` (`6`):
   Maps to single HAL input pins depending 'haltype' and 'scale' attributes.
-* `W_COILS`(15):
+* `W_COILS` (`15`):
   Maps to 1..2000 HAL input pins of type 'HAL_BIT'.
-* `W_REGISTERS`(16):
+* `W_REGISTERS` (`16`):
   Maps to 1..125 HAL input pins depending 'haltype' and 'scale' attributes.
 
 You can use the function's symbolic name or numerical value in '<command>' in
@@ -184,7 +184,10 @@ other setup values as attributes:
   data is present _before_ the Modbus commands start sending potentially
   harmful or invalid data because the pins have not yet been initialized to
   their proper values. When set, only pin values that are changed from their
-  initial values are propagated in Modbus write commands. Default true.
+  initial values are propagated in Modbus write commands. +
+  This value represents the global default used buy the individual commands
+  from the '<commands>' section and can be overridden in the
+  individual '<command>' instructions. Default true.
 
 The default parameters, without any attributes defined in '<mesamodbus>', are
 half duplex serial setup using 8E1@9600 and running all commands as fast as
@@ -271,13 +274,13 @@ the value to send. An optional 'modbustype' attribute models the data to send
 to the format of the 'modbustype'. The default is U_AB if the type is not
 specified.
 
-The write coils Modbus function `W_COILS`(15) further restrict the 'value' to
-zero (0) or one (1). The write coil `W_COIL`(5) has a fixed type of U_AB and
+The write coils Modbus function `W_COILS` (`15`) further restrict the 'value' to
+zero (0) or one (1). The write coil `W_COIL` (`5`) has a fixed type of U_AB and
 expects a value of 0x0000 or 0xff00. Other values may be given, but a warning
 will then be emitted.
 
-The Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
-`R_INPUTREGS`(4) are supported in the '<initlist>/<command>' but the returned
+The Modbus read functions `R_COILS` (`1`), `R_INPUTS` (`2`), `R_REGISTERS` (`3`) and
+`R_INPUTREGS` (`4`) are supported in the '<initlist>/<command>' but the returned
 data is ignored. Read functions are supported because some devices require a
 read function as a trigger.
 
@@ -289,8 +292,8 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   Set to true if a device sends an answer on broadcast, which must be ignored.
   Default false.
 *count* [1..2000]/[1..125]::
-  Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
-  `R_INPUTREGS`(4) must specify the number of coils, inputs, registers or
+  Modbus read functions `R_COILS` (`1`), `R_INPUTS` (`2`), `R_REGISTERS` (`3`) and
+  `R_INPUTREGS` (`4`) must specify the number of coils, inputs, registers or
   inputregs to read. Write functions do not require the 'count' attribute
   because the '<data>' tags dictate the size of the packet to send.
 *device*::
@@ -320,11 +323,19 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   This may be required for flaky devices. Default false.
 
 
+===== Delay instruction
 Recognized '<initlist>/<command>' attributes in delay commands:
 
 *delay* [0..60000000]::
   Communication will be suspended by 'delay' micro-seconds.
 
+
+===== Communication parameter change
+Communication parameters may be temporarily changed to perform live setup of
+Modbus devices to change their own communication parameters. Some devices will
+start with a fixed rate and must be reprogrammed at start to change to a
+different rate. The default setup from '<mesamodbus>' must be restored if one
+or more parameters were changed or a warning will be emitted.
 
 Recognized '<initlist>/<command>' attributes in communication parameter change
 commands. Attributes not specified will be taken from the '<mesamodbus>' tag's
@@ -344,6 +355,7 @@ attributes:
   Communication number of stopbits override.
 
 
+===== Initialization data
 Recognized '<initlist>/<command>/<data>' attributes:
 
 *modbustype* [see *MODBUS TYPE*]::
@@ -365,20 +377,22 @@ specific type using the 'haltype' attribute. Recognized are:
 * 'HAL_U64'
 
 The types are also recognized without the HAL_ prefix. Note that coil and
-binary input functions `R_COILS`(1), `R_INPUTS`(2), `W_COIL`(5) and `W_COILS`(15) can
-only map to 'HAL_BIT' and do so implicitly.
+binary input functions `R_COILS` (`1`), `R_INPUTS` (`2`), `W_COIL` (`5`)
+and `W_COILS` (`15`) can only map to 'HAL_BIT' and do so implicitly.
 
 The 'HAL_BIT', 'HAL_U32' and 'HAL_U64' types always map to one single HAL pin.
 
 The 'HAL_FLOAT', 'HAL_S32' and 'HAL_S64' types can generate one single pin or
-can generate multiple pins with 'offset' and 'scale'. Output pins with
-`R_REGISTERS`(3) and `R_INPUTREGS`(4) can add a 'scaled' pin to the set.
+can generate multiple pins with 'offset' and 'scale'. Output pins
+with `R_REGISTERS` (`3`) and `R_INPUTREGS` (`4`) can add a 'scaled' pin to
+the set.
 
 Mapping HAL pins to commands requires a 'modbustype' attribute to encode the
-format and necessary conversions. Register functions `R_REGISTERS`(3),
-`R_INPUTREGS`(4), `W_REGISTER`(6) and `W_REGISTERS`(16) may map to 'HAL_BIT' only
-when using unsigned 'modbustype' where a value of zero (0) is _false_ and any
-other value is _true_ for write functions or one (1) for read functions.
+format and necessary conversions. Register functions `R_REGISTERS` (`3`),
+ `R_INPUTREGS` (`4`), `W_REGISTER` (`6`) and `W_REGISTERS` (`16`) may map
+to 'HAL_BIT' only when using unsigned 'modbustype' where a value of zero (0)
+is _false_ and any other value is _true_ for write functions or one (1) for
+read functions.
 
 === <commands>
 The '<commands>' section defines one or more '<command>' tags to describe the
@@ -397,12 +411,12 @@ Additionally, the '<command>' tag may have one or more '<pin>' child-tags to
 create user-defined HAL pin names. Each '<pin>' tag may again include
 a '<description>' child-tag.
 
-Modbus read functions `R_COILS`(1), `R_INPUTS`(2), `R_REGISTERS`(3) and
-`R_INPUTREGS`(4) will always be sent at the specified interval. However, the
-Modbus write functions `W_COIL`(5), `W_REGISTER`(6), `W_COILS`(15) and
-`W_REGISTERS`(16) are _only_ sent when the source data (pin value) changed. You
-must specify the 'resend' attribute to force repeated writes at the specified
-interval.
+Modbus read functions `R_COILS` (`1`), `R_INPUTS` (`2`), `R_REGISTERS` (`3`)
+and `R_INPUTREGS` (`4`) will always be sent at the specified interval.
+However, the Modbus write functions `W_COIL` (`5`), `W_REGISTER` (`6`),
+ `W_COILS` (`15`) and `W_REGISTERS` (`16`) are _only_ sent when the source data
+(pin value) changed. You must specify the 'resend' attribute to force repeated
+writes at the specified interval.
 
 [source,xml]
 ----
@@ -448,7 +462,7 @@ interval.
       changed. No answer is expected to be received (noanswer=1). This
       command generates a (valid) Modbus packet on the bus and nothing more.
       You must be sure that no reply is sent from the device or errors will
-      occur (f.ex. silent watchdog).
+      occur (for example silent watchdog).
     </description>
   </command>
 </commands>
@@ -482,8 +496,9 @@ Recognized '<commands>/<command>' attributes:
   The attribute value is one of the supported Modbus functions.
 *haltype* [see *HAL TYPES*]::
   The HAL pin type for interactions. You do not need to specify this attribute
-  for Modbus functions read/write coil(s) or inputs `R_COILS`(1), `R_INPUTS`(2),
-  `W_COIL`(5) and `W_COILS`(15) as these always use the 'HAL_BIT' type.
+  for the Modbus functions read/write coil(s) or inputs, `R_COILS` (`1`),
+  `R_INPUTS` (`2`), `W_COIL` (`5`) and `W_COILS` (`15`), as these always use
+  the 'HAL_BIT' type.
 *interval* [once,0..3600000000]::
   The command repeat interval in micro-seconds. This is the time between
   repeating this '<command>'. An interval shorter than the time it takes to work
@@ -496,13 +511,13 @@ Recognized '<commands>/<command>' attributes:
   cannot be achieved in the '<initlist>' sequence. Default '<mesamodbus>[interval]'.
 *modbustype* [see *MODBUS TYPES*]::
   The Modbus data mapping from/to register(s) for Modbus functions read/write
-  register(s) `R_REGISTERS`(3), `R_INPUTREGS`(4), `W_REGISTER`(6) and
-  `W_REGISTERS`(16). The default is U_AB if not specified.
+  register(s) `R_REGISTERS` (`3`), `R_INPUTREGS` (`4`), `W_REGISTER` (`6`) and
+  `W_REGISTERS` (`16`). The default is U_AB if not specified.
 *name*::
-  The base name for HAL pin names. +
-  Example: if 'count="2"' and 'name="myname"', the the pins will have names
-  like _myname-00_, _myname-01_, unless one or more '<pin>' tags override the
-  name.
+  The name for HAL pin names. +
+  Example: if `count="2"` and `name="myname"`, then the pins will have
+  names _myname-00_ and _myname-01_, unless one or more '<pin>' tags override
+  the name.
 *noanswer* [Boolean]::
   Set to true if a device does not return a reply to a command. This can be
   intentional if you send a command to a non-existing device. Default false.
@@ -512,11 +527,11 @@ Recognized '<commands>/<command>' attributes:
   commands. Some devices require a constant "reminder" (like watchdogs) and
   you need to send the data regularly. Default false.
 *scale* [Boolean]::
-  Add scaling HAL pins. Modbus read functions `R_REGISTERS`(3) and `R_INPUTREGS`(4)
+  Add scaling HAL pins. Modbus read functions `R_REGISTERS` (`3`) and `R_INPUTREGS` (`4`)
   add extra HAL pins *pin.name.offset* (in, 64-bit 'haltype'), *pin.name.scale*
   (in, 'HAL_FLOAT') and *pin.name.scaled* (out, 'HAL_FLOAT'). +
-  The Modbus write functions `W_REGISTER`(6) and `W_REGISTERS`(16) create extra HAL
-  pins *pin.name.offset* (in, 64-bit 'haltype') and *pin.name.scale*
+  The Modbus write functions `W_REGISTER` (`6`) and `W_REGISTERS` (`16`) create
+  extra HAL pins *pin.name.offset* (in, 64-bit 'haltype') and *pin.name.scale*
   (in, 'HAL_FLOAT'). +
   The 'scale' attribute is only supported for 'HAL_FLOAT', 'HAL_S32' and 'HAL_S64'.
   Default is true for 'HAL_FLOAT' and false for others. The *scale* pin is
@@ -545,7 +560,11 @@ Recognized '<commands>/<command>' attributes:
   should be emitted when it does. This differs from 'noanswer' in that a reply
   may be expected within the timeout period but not after the timeout expires.
   This may be required for flaky devices. Default false.
+*writeflush* [Boolean]::
+  The override the 'writeflush' value. See '<mesamodbus>[writeflush]' for
+  details. Default '<mesamodbus>[writeflush]'.
 
+===== Pins
 Defining '<pin>' tags allows for custom naming schemes and allows reducing read
 and write function overhead. Using '<pin>' tags enables you to combine
 different 'modbustype' and 'haltype' values to be read or written to or from

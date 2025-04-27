@@ -82,13 +82,11 @@ MBCCB_FORMAT_PARITYODD_BIT = 1 # bits 1 Odd parity if set
 MBCCB_FORMAT_STOPBITS2_BIT = 2 # bit  2 0=8x1 1=8x2
 MBCCB_FORMAT_DUPLEX_BIT    = 3 # bit  3 Set for full-duplex (rx-mask off)
 MBCCB_FORMAT_SUSPEND_BIT   = 4 # bit  4 Set if state-machine starts suspended
-MBCCB_FORMAT_WFLUSH_BIT    = 5 # bit  5 Set if initial writes are suppressed
 MBCCB_FORMAT_PARITYEN      = (1 << MBCCB_FORMAT_PARITYEN_BIT)
 MBCCB_FORMAT_PARITYODD     = (1 << MBCCB_FORMAT_PARITYODD_BIT)
 MBCCB_FORMAT_STOPBITS2     = (1 << MBCCB_FORMAT_STOPBITS2_BIT)
 MBCCB_FORMAT_DUPLEX        = (1 << MBCCB_FORMAT_DUPLEX_BIT)
 MBCCB_FORMAT_SUSPEND       = (1 << MBCCB_FORMAT_SUSPEND_BIT)
-MBCCB_FORMAT_WFLUSH        = (1 << MBCCB_FORMAT_WFLUSH_BIT)
 
 # Values for parity internally
 PARITY_NONE = 0
@@ -292,11 +290,12 @@ MBCCB_CMDF_TIMESOUT = 0x0001
 MBCCB_CMDF_BCANSWER = 0x0002
 MBCCB_CMDF_NOANSWER = 0x0004
 MBCCB_CMDF_RESEND   = 0x0008
+MBCCB_CMDF_WFLUSH   = 0x0010
 MBCCB_CMDF_PARITYEN = 0x0100
 MBCCB_CMDF_PARITYODD= 0x0200
 MBCCB_CMDF_STOPBITS2= 0x0400
 MBCCB_CMDF_INITMASK = 0x0707 # sum of allowed flags in init
-MBCCB_CMDF_MASK     = 0x000f # sum of allowed normal flags
+MBCCB_CMDF_MASK     = 0x001f # sum of allowed normal command flags
 
 # Allowed attributes in <mesamodbus>
 MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
@@ -307,7 +306,7 @@ MESAATTRIB = [ 'baudrate', 'drivedelay', 'duplex',   'icdelay', 'interval',
 CMDSATTRIB = [ 'address',     'bcanswer', 'clamp',   'count',    'delay',
                'device',      'function', 'haltype', 'interval', 'modbustype',
                'name',        'noanswer', 'resend',  'scale',    'timeout',
-               'timeoutbits', 'timesout' ]
+               'timeoutbits', 'timesout', 'writeflush' ]
 
 # Allowed attributes in <commands>/<command>/<pin>
 PINSATTRIB = [ 'clamp', 'name', 'haltype', 'modbustype', 'scale' ]
@@ -461,7 +460,7 @@ def getBoolean(attrib, name):
         return True
     if 'F' == a or 'FALSE' == a or '0' == a:
         return False
-    pwarn("Expected boolean value in '{}' attribute, not '{}'".format(name, attrib[name]))
+    perr("Expected boolean value in '{}' attribute, not '{}'".format(name, attrib[name]))
     return None
 
 #
@@ -479,7 +478,8 @@ def cflagList(flags):
     if 0 == flags:
         return "<none>"
     l = { MBCCB_CMDF_TIMESOUT: 'timesout', MBCCB_CMDF_BCANSWER: 'bcanswer',
-          MBCCB_CMDF_NOANSWER: 'noanswer', MBCCB_CMDF_RESEND:   'resend' }
+          MBCCB_CMDF_NOANSWER: 'noanswer', MBCCB_CMDF_RESEND:   'resend',
+          MBCCB_CMDF_WFLUSH:   'writeflush' }
     return ','.join([l[v] for v in l.keys() if flags & v])
 
 def pflagList(flags):
@@ -555,7 +555,7 @@ def handleDevices(devs):
     devlist  = {'broadcast': 0}   # map device name to address
     addrlist = {0: 'broadcast'}   # map address to device name
     for dev in devs:
-        ldl = "devices/device[{}]".format(1 + len(devlist))
+        ldl = "devices/device[{}]".format(len(devlist))
         # Attribute name must exist and of proper format
         if 'name' not in dev.attrib:
             perr("Missing 'name' attribute in {}".format(ldl))
@@ -582,10 +582,10 @@ def handleDevices(devs):
 
         # Don't allow duplicates in the list
         if name in devlist:
-            perr("Device name '{}' already defined in {}".format(ldl))
+            perr("Device name '{}' already defined in {}".format(name, ldl))
             continue
         if address in addrlist:
-            perr("Device address {} already used for device '{}' in {}".format(address, addrlist[address], ldl))
+            perr("Device '{}': address '{}' already used for device '{}' in {}".format(name, address, addrlist[address], ldl))
             continue
 
         addrlist[address] = name
@@ -603,18 +603,21 @@ def handleDevices(devs):
 #
 # Parse optional attribute flags
 #
-def parseOptFlags(dev, attrs, cflags, pflags):
+def parseOptFlags(dev, attrs, cflags, pflags, ers):
     cflags |= MBCCB_CMDF_TIMESOUT if getBoolean(attrs, 'timesout') else 0
     cflags |= MBCCB_CMDF_BCANSWER if getBoolean(attrs, 'bcanswer') else 0
     cflags |= MBCCB_CMDF_NOANSWER if getBoolean(attrs, 'noanswer') else 0
     cflags |= MBCCB_CMDF_RESEND   if getBoolean(attrs, 'resend')   else 0
+    # The default of writeflush depends on the global setting
+    cflags |= MBCCB_CMDF_WFLUSH   if getBoolean(attrs, 'writeflush') else 0
+    cflags &= ~MBCCB_CMDF_WFLUSH  if False == getBoolean(attrs, 'writeflush') else ~0
     # Scale and clamp can be default on. This allows them to be turned off.
     pflags |= MBCCB_PINF_SCALE  if getBoolean(attrs, 'scale')     else 0
     pflags |= MBCCB_PINF_CLAMP  if getBoolean(attrs, 'clamp')     else 0
     pflags &= ~MBCCB_PINF_SCALE if False == getBoolean(attrs, 'scale') else ~0
     pflags &= ~MBCCB_PINF_CLAMP if False == getBoolean(attrs, 'clamp') else ~0
     if 'broadcast' != dev and 0 != (cflags & MBCCB_CMDF_BCANSWER):
-        perr("Cannot use 'bcanswer' attribute on non-broadcast target '{}'".format(dev));
+        perr("Cannot use 'bcanswer' attribute on non-broadcast target '{}' in {}".format(dev, ers));
     return cflags, pflags
 
 #
@@ -699,6 +702,26 @@ def getAddress(attrib, ers):
     return addr
 
 #
+# Extract and check the 'function' attribute
+#
+def getFunction(attrib, ers):
+    if 'function' not in attrib:
+        perr("Attribute 'function' missing in {}".format(ers))
+        return None
+    name = attrib['function'].upper()
+    if name in FUNCTIONS:
+        return name # We're done if we recognize the name/value
+    # Maybe it is a hex number
+    try:
+        val = int(name, 0)
+    except (ValueError, TypeError) as err:
+        perr("Invalid function '{}' in {}".format(attrib['function'], ers))
+        return None
+    if val not in FUNCNAMES:
+        perr("Function '{}' not supported in {}".format(attrib['function'], ers))
+    return FUNCNAMES[val]
+
+#
 # Check the allowed attributes for a tag
 #
 def checkAttribs(have, may, suffix):
@@ -724,7 +747,7 @@ def handleInits(inits):
     for cmd in inits:
         lil = "initlist/command[{}]".format(1 + len(initlist))
         if cmd.tag != 'command':
-            perr("Expected <command> tag as child of {}".format(lil))
+            perr("Expected <command> tag as child of <initlist> in initlist/{}".format(cmd.tag))
             continue
 
         # This may be a delay command
@@ -762,7 +785,7 @@ def handleInits(inits):
             continue
 
         # Get optional attrib flags
-        cflags, pflags = parseOptFlags(device, cmd.attrib, 0, 0)
+        cflags, pflags = parseOptFlags(device, cmd.attrib, 0, 0, lil)
         if 0 != cflags & ~MBCCB_CMDF_INITMASK:
             pwarn("Additional flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_INITMASK, lil))
 
@@ -772,14 +795,11 @@ def handleInits(inits):
             continue
 
         # Must have a function
-        if 'function' not in cmd.attrib:
-            perr("Attribute 'function' missing in {}".format(lil))
-            continue
         # Only known functions are allowed
-        function = cmd.attrib['function'].upper()
-        if function not in FUNCTIONS:
-            perr("Function '{}' out of range {} in {}".format(function, str(list(FUNCTIONS.keys())), lil))
+        function = getFunction(cmd.attrib, lil)
+        if None == function:
             continue
+
         maxcount = FUNCTIONS[function][1]
         function = FUNCTIONS[function][0]
 
@@ -809,7 +829,7 @@ def handleInits(inits):
                 err = True
                 break
             # Get the type of the data
-            mtype = data.attrib['modbustype'] if 'modbustype' in data.attrib else 'U_AB'
+            mtype = data.attrib['modbustype'].upper() if 'modbustype' in data.attrib else 'U_AB'
             if mtype not in MBTYPES:
                 perr("Invalid modbustype '{}' in {}".format(mtype, lil))
                 err = True
@@ -823,7 +843,7 @@ def handleInits(inits):
                     err = True
                     break
                 if W_REGISTER == function and mtype not in [F_AB, F_BA]:
-                    perr("Floating point value requires 16-bit type for W_REGISTER/6) in {}".format(ldl))
+                    perr("Floating point value requires 16-bit type for W_REGISTER(6) in {}".format(ldl))
                     err = True
                     break
 
@@ -850,6 +870,10 @@ def handleInits(inits):
                     dlnbytes += 4
                 else: # value is fine, otherwise we'd get an OverflowError on conversion
                     # 64-bit float
+                    if value <= -1.7e308 or value >= +1.7e308:    # +/- 1.7976931348623157e308
+                        perr("Attribute 'value' out of range [-1.7e308,+1.7e308] for 64-bit float {}".format(ldl))
+                        err = True
+                        break
                     # XXX: +/inf and NaN are also fine?
                     datalist.append(mangle64(struct.pack(">d", value), mtype))
                     dlnbytes += 8
@@ -862,14 +886,14 @@ def handleInits(inits):
                 # Write single coil usually has special value
                 # We allow deviation because some devices allow it too
                 if W_COIL == function:
-                    if 'modbustype' in data.attrib or mtype != U_AB:
+                    if 'modbustype' in data.attrib and mtype != U_AB:
                         pwarn("Attribute 'modbustype' ignored for W_COIL(5) and always set to U_AB in {}".format(ldl))
                     if value != 0 and value != 0xff00:
                         pwarn("Data value '{}' for W_COIL(5) is normally expected to be 0 or 0xff00 (65280) in {}".format(value, ldl))
                     datalist.append(struct.pack('>H', value));
                     dlnbytes += 2
                 elif W_COILS == function:
-                    if 'modbustype' in data.attrib or mtype != U_AB:
+                    if 'modbustype' in data.attrib:
                         perr("Attribute 'modbustype' ignored for W_COILS(15) and always set to binary bits in {}".format(ldl))
                         err = True
                         break;
@@ -978,14 +1002,16 @@ def handleInits(inits):
             continue
 
         if count < 1 or count > maxcount:
+            if count + address > 65535:
+                perr("Count would wrap address range in {}".format(lil))
             perr("Data element count '{}' is out of range [1..{}] for function {}({}) in {}"
-                 .format(b, maxcount, FUNCNAMES[function], function, lil))
+                 .format(count, maxcount, FUNCNAMES[function], function, lil))
             continue
 
         if 0 == timeout:
             timeout = calcTimeout(function, count, MBT_AB, cfgs);
 
-        initlist.append({'device': device, 'mbid': devices[device], 'function': function,
+        initlist.append({'device': device, 'mbid': devices[device], 'function': function, 'count': count,
                          'address': address, 'data': datalist, 'timeout': timeout, 'flags': cflags })
         if verbose:
             print("Init {:2}: {} {}({}) addr=0x{:04x} flags={} timeout={} data="
@@ -1010,8 +1036,7 @@ def getModbusType(tag, ers):
         return None
     mbt = tag.attrib['modbustype'].upper()
     if mbt not in MBTYPES:
-        perr("Invalid modbustype '{}' must be one of {} in {}"
-                .format(tag.attrib['modbustype'], str(list(MBTYPES.keys())), ers))
+        perr("Invalid modbustype '{}' in {}".format(tag.attrib['modbustype'], ers))
         return None
     return MBTYPES[mbt];
 
@@ -1023,8 +1048,7 @@ def getHalType(tag, ers):
         return None
     ht = tag.attrib['haltype'].upper()
     if ht not in HALTYPES:
-        perr("Invalid haltype '{}' must be one of {} in {}"
-                .format(tag.attrib['haltype'], str(list(HALTYPES.keys())), ers))
+        perr("Invalid haltype '{}' in {}".format(tag.attrib['haltype'], ers))
         return None
     return HALTYPES[ht];
 
@@ -1037,7 +1061,7 @@ def handleCommands(commands):
     for cmd in commands:
         lcl = "commands/command[{}]".format(1 + len(cmdlist))
         if cmd.tag != 'command':
-            perr("Expected <command> tag as child of <commands>")
+            perr("Expected <command> tag as child of <commands> in commands/{}".format(cmd.tag))
             continue
 
         if 'delay' in cmd.attrib:
@@ -1082,19 +1106,16 @@ def handleCommands(commands):
             continue
 
         # The command function to perform
-        if 'function' not in cmd.attrib:
-            perr("Attribute 'function' missing in {}".format(lcl))
+        function = getFunction(cmd.attrib, lcl)
+        if None == function:
             continue
-        function = cmd.attrib['function'].upper()
+        maxcount = FUNCTIONS[function][1]
+        function = FUNCTIONS[function][0]
+
         # check depends on unicast or broadcast
         if 'broadcast' == device and function not in WRITEFUNCTIONS:
             perr("Function '{}' not available for broadcast in {}".format(FUNCNAMES[function], lcl))
             continue
-        elif function not in FUNCTIONS:
-            perr("Function '{}' not defined in {} in {}".format(function, str(list(FUNCTIONS.keys())), lcl))
-            continue
-        maxcount = FUNCTIONS[function][1]
-        function = FUNCTIONS[function][0]
 
         # How many pins to read/write
         if  function in [W_REGISTER, W_COIL]:
@@ -1109,7 +1130,7 @@ def handleCommands(commands):
         if function in BITFUNCTIONS:
             # Coils and inputs are binary and always map to HAL_BIT
             if 'modbustype' in cmd.attrib:
-                pwarn("Attribute 'modbustype' ignored for bit functions ({}) in {}".format(str(list(BITFUNCTIONS.keys())), lcl))
+                pwarn("Attribute 'modbustype' ignored for bit functions in {}".format(lcl))
             if 'haltype' in cmd.attrib:
                 pwarn("Attribute 'haltype' ignored for bit functions (always HAL_BIT) in {}".format(lcl))
             defmtype = [-1, 2000, 1] # fake mtype
@@ -1127,9 +1148,11 @@ def handleCommands(commands):
         # Get optional attrib flags
         # scale is default for float pins
         # clamp is default on all pins
+        # writeflush depends on global setting
+        defcflag  = MBCCB_CMDF_WFLUSH if configparams['writeflush'] else 0
         defpflag  = MBCCB_PINF_SCALE if defhtype == HAL_FLT else 0
         defpflag |= MBCCB_PINF_CLAMP if function in REGFUNCTIONS else 0
-        cflags, pflags = parseOptFlags(device, cmd.attrib, 0, defpflag)
+        cflags, pflags = parseOptFlags(device, cmd.attrib, defcflag, defpflag, lcl)
         if 0 != cflags & ~MBCCB_CMDF_MASK:
             pwarn("Additional cmd flags '0x{:04x}' (allowed=0x{:04x}) in {}".format(cflags, MBCCB_CMDF_MASK, lcl))
         if 0 != pflags & ~MBCCB_PINF_MASK:
@@ -1152,6 +1175,10 @@ def handleCommands(commands):
         if (cflags & MBCCB_CMDF_RESEND) and interval == 0xffffffff:
             perr("Interval 'once' and 'resend' are mutually exclusive in {}".format(lcl))
             continue
+
+        # Write flush only makes sense in write functions
+        if function not in WRITEFUNCTIONS:
+            cflags &= ~MBCCB_CMDF_WFLUSH
 
         cmdname = cmd.attrib['name'] if 'name' in cmd.attrib else None
         if None != cmdname:
@@ -1221,6 +1248,10 @@ def handleCommands(commands):
                 break
 
             if function in BITFUNCTIONS:
+                if 'modbustype' in pin.attrib:
+                    pwarn("Attribute 'modbustype' ignored for bit functions in {}".format(lpl))
+                if 'haltype' in pin.attrib:
+                    pwarn("Attribute 'haltype' ignored for bit functions in {}".format(lpl))
                 pinlist.append({'pin': pintag, 'mtype': 0, 'htype': HAL_BIT, 'flags': 0, 'regofs': regofs})
                 pinlistall.append(pintag)
                 regofs += 1
@@ -1249,7 +1280,7 @@ def handleCommands(commands):
                 err = True
                 break
             # scale and clamp flags
-            cf, pf = parseOptFlags(device, pin.attrib, 0, pflags)
+            cf, pf = parseOptFlags(device, pin.attrib, 0, pflags, lpl)
             if (pf & MBCCB_PINF_SCALE) and phtype in [HAL_U32, HAL_U64]:
                 pwarn("Unsigned hal types cannot be scaled, disabling in {}".format(lpl))
                 pf &= ~MBCCB_PINF_SCALE
@@ -1269,6 +1300,7 @@ def handleCommands(commands):
                 pwarn("Multi-register type '{}' not aligned to natural boundary in {}".format(MBNAMES[pmtype[0]], lpl))
 
             pinlist.append({'pin': pintag, 'mtype': pmtype[0], 'htype': phtype, 'flags': pf, 'regofs': regofs})
+            pinlistall.append(pintag)
             regofs += MBTBYTESIZES[mbtOrder(pmtype[0])] // 2
         # endfor pin in cmd
         if err:
@@ -1284,7 +1316,7 @@ def handleCommands(commands):
             if 0 == count:
                 count = len(pinlist)    # pin list determines count
             elif len(pinlist) > count:
-                perr("Number of pins '{}' larger than count '{}' in {}".format(len(pinlist), count, lcl))
+                perr("Number of pins '{}' larger than (max)count '{}' in {}".format(len(pinlist), count, lcl))
                 continue
 
         # Append default naming scheme "name-XX"
@@ -1326,7 +1358,7 @@ def handleCommands(commands):
             continue
 
         # Don't wrap address
-        if regofs + address > 65536:
+        if regofs + address > 65535:
             perr("Reading {} registers from address {} wraps the address counter in {}".format(regofs, address, lcl))
             continue
 
@@ -1429,7 +1461,6 @@ def main():
         print("  drivedelay: {} bits".format(configparams['drivedelay']))
         print("  timeout   : {}".format(getAutoFmt(configparams['timeout'], "microseconds")))
         print("  suspend   : {}".format("true" if configparams['suspend'] else "false"))
-        print("  writeflush: {}".format("true" if configparams['writeflush'] else "false"))
 
     # Parse the nodes
     global devices
@@ -1567,7 +1598,7 @@ def main():
                 dlb.append(d)
             elif func in [R_COILS, R_INPUTS, R_INPUTREGS, R_REGISTERS]:
                 # mbid, func, address and number == 6 bytes
-                dlb.append(struct.pack(">BBBHH", 6, mbid, func, addr, i['data'][0]))
+                dlb.append(struct.pack(">BBBHH", 6, mbid, func, addr, i['count']))
                 dlblen += 6 + 1
             else:
                 perr("Unhandled init function mbid={}, func={}, addr={}".format(mbid, func, addr))
@@ -1634,7 +1665,6 @@ def main():
     flg  = MBCCB_FORMAT_STOPBITS2 if configparams['stopbits'] == 2 else 0
     flg |= MBCCB_FORMAT_DUPLEX if configparams['duplex'] else 0
     flg |= MBCCB_FORMAT_SUSPEND if configparams['suspend'] else 0
-    flg |= MBCCB_FORMAT_WFLUSH if configparams['writeflush'] else 0
     header = (struct.pack(">8sIHHHHHHIIIIIIIIII",
                         b'MesaMB01',
                         configparams['baudrate'],
