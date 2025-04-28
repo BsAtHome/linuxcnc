@@ -29,8 +29,6 @@ jobs:
         set -x
         sudo apt-get install -y eatmydata
         eatmydata ./scripts/travis-install-build-deps.sh
-        eatmydata curl -L -O https://snapshot.debian.org/archive/debian/20220716T154603Z/pool/main/p/po4a/po4a_0.67-2_all.deb
-        sudo eatmydata apt-get install --allow-downgrades ./po4a_0.67-2_all.deb
         cd src
         eatmydata ./autogen.sh
         eatmydata ./configure --with-realtime=uspace --disable-check-runtime-deps
@@ -56,8 +54,6 @@ jobs:
         sudo apt-get install -y eatmydata
         eatmydata ./scripts/travis-install-build-deps.sh
         sudo eatmydata apt-get install -y clang
-        eatmydata curl -L -O https://snapshot.debian.org/archive/debian/20220716T154603Z/pool/main/p/po4a/po4a_0.67-2_all.deb
-        sudo eatmydata apt-get install --allow-downgrades ./po4a_0.67-2_all.deb
         cd src
         eatmydata ./autogen.sh
         CC=clang CXX=clang++ eatmydata ./configure --with-realtime=uspace --disable-check-runtime-deps
@@ -81,8 +77,6 @@ jobs:
       run: |
         ./scripts/travis-install-build-deps.sh
         sudo apt-get install -y eatmydata
-        curl -L -O https://snapshot.debian.org/archive/debian/20220716T154603Z/pool/main/p/po4a/po4a_0.67-2_all.deb
-        sudo apt-get install --allow-downgrades ./po4a_0.67-2_all.deb
         cd src
         eatmydata ./autogen.sh
         eatmydata ./configure --with-realtime=uspace --disable-check-runtime-deps --enable-build-documentation=html
