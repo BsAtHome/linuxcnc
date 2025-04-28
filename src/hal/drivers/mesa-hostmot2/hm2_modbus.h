@@ -76,10 +76,6 @@ typedef struct {
 	rtapi_u32	cdataptr; // Pin names, packet data for init
 } hm2_modbus_mbccb_cmds_t;
 
-#define MBCCB_PINF_SCALE	0x0001	// Add scale/offset pins
-#define MBCCB_PINF_CLAMP	0x0002	// Clamp values to fit target
-#define MBCCB_PINF_MASK		0x0003	// sum of pin flags
-
 #define MBCCB_CMDF_TIMESOUT  0x0001	// Don't treat timeout as an error
 #define MBCCB_CMDF_BCANSWER  0x0002	// Broadcasts will get an answer, ignore it
 #define MBCCB_CMDF_NOANSWER  0x0004	// Don't expect an answer
@@ -91,12 +87,16 @@ typedef struct {
 #define MBCCB_CMDF_INITMASK  0x0707	// sum of allowed flags in init
 #define MBCCB_CMDF_MASK      0x001f	// sum of allowed normal command flags
 
+#define MBCCB_PINF_SCALE	0x01	// Add scale/offset pins
+#define MBCCB_PINF_CLAMP	0x02	// Clamp values to fit target
+#define MBCCB_PINF_MASK		0x03	// sum of pin flags
+
 // Type mapping for pins/PDU register data
-// Only for R_INPUTREGS, R_REGISTERS and W_REGISTERS
+// Only for R_INPUTREGS, R_REGISTERS, W_REGISTER and W_REGISTERS
 typedef struct {
 	rtapi_u8	mtype;	// Modbus type
 	rtapi_u8	htype;	// HAL type
-	rtapi_u8	flags;	// scale and clamp flags
+	rtapi_u8	flags;	// scale and clamp flags (MBCCB_PINF_*)
 	rtapi_u8	regofs;	// PDU register offset for value
 } hm2_modbus_mbccb_type_t;
 
