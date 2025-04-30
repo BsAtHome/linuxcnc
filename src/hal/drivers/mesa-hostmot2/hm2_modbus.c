@@ -426,7 +426,7 @@ static int send_comms_change(hm2_modbus_inst_t *inst)
 	else
 		inst->cfg_tx.ifdelay = calc_ifdelay(inst, baudrate, parity, stopbits) + 1;
 
-	inst->cfg_tx.drivedelay = cc->cmd.idrvdelay;
+	inst->cfg_tx.drivedelay = cc->cmd.idrvdelay ? cc->cmd.idrvdelay : 1;
 
 	// Expose to HAL
 	inst->hal->baudrate = baudrate;
@@ -2720,15 +2720,20 @@ int rtapi_app_main(void)
 		}
 		inst->hal->parity   = parity;
 		inst->hal->stopbits = stopbits;
-		inst->hal->drvdelay = inst->mbccb->drvdelay;
 		if(!inst->mbccb->rxdelay)	// Auto
 			inst->hal->rxdelay = inst->cfg_rx.ifdelay = calc_ifdelay(inst, inst->mbccb->baudrate, parity, stopbits) - 1;
 		else	// Manual
 			inst->hal->rxdelay = inst->cfg_rx.ifdelay = inst->mbccb->rxdelay;
+
 		if(!inst->mbccb->txdelay)	// Auto
 			inst->hal->txdelay = inst->cfg_tx.ifdelay = calc_ifdelay(inst, inst->mbccb->baudrate, parity, stopbits) + 1;
 		else	// Manual
 			inst->hal->txdelay = inst->cfg_tx.ifdelay = inst->mbccb->txdelay;
+
+		if(!inst->mbccb->drvdelay)	// Auto
+			inst->hal->drvdelay = inst->cfg_tx.drivedelay = 1;
+		else	// Manual
+			inst->hal->drvdelay = inst->cfg_tx.drivedelay = inst->mbccb->drvdelay;
 
 		inst->cfg_rx.filterrate = 0;	// Zero means 2 times baudrate
 		inst->cfg_rx.flags |= HM2_PKTUART_CONFIG_RXEN;

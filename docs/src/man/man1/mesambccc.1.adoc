@@ -14,7 +14,8 @@ The *mesambccc* utility is used to compile hm2_modbus driver command control
 description files for running Modbus devices with Mesa cards using the
 PktUARTs. The MBCCS source file is an XML formatted document which describes
 the devices connected, pins to create and commands to issue to the PktUART port
-using the Modbus protocol. See *MBCCS FILE FORMAT* below.
+using the Modbus protocol. See link:#_mbccs_file_format[*MBCCS FILE FORMAT*]
+below.
 
 == OPTIONS
 
@@ -51,13 +52,12 @@ attributes, which should always be lower case.
 Boolean attributes accept values "false" and "0" for false and "true" and "1"
 for true. Integer numerical values can be entered in decimal, hexadecimal,
 octal or binary form. The latter three require the value to be prefixed with
-"0x", "0o" or "0b" respectively. Please note that the 'function' attribute must
-be either a function name or the decimal function number (see *MODBUS FUNCTIONS*).
-Floating point values follow standard rules for floating point values.
+"0x", "0o" or "0b" respectively. Floating point values follow standard rules
+for floating point values.
 
-All values are checked to be within an accepted range. Errors and warnings are
-emitted when values are out of bound. In case of a warning they may be clamped
-to the acceptable range.
+All values are checked to be within an acceptable range. Errors and warnings
+are emitted when values are out of bounds. In case of a warning they may be
+clamped to the acceptable range.
 
 === MODBUS FUNCTIONS
 A subset of the Modbus functions is supported (with function number in parentheses):
@@ -82,7 +82,7 @@ A subset of the Modbus functions is supported (with function number in parenthes
 You can use the function's symbolic name or numerical value in '<command>' in
 the 'function' attribute (as in `function="W_REGISTERS"` or `function="16"`).
 
-=== MODBUS TYPE
+=== MODBUS TYPES
 The 'modbustype' attribute declares the interpretation of values to or from a
 Modbus device's registers. They can be a signed integer (S), unsigned integer
 (U) or a floating point value (F). The size of the value can be 16-bit, 32-bit
@@ -138,10 +138,10 @@ other setup values as attributes:
   Communication speed. Any speed over 460800 will result in side-effects
   because the internal hardware timers may overflow to keep track of the Modbus
   protocol requirements. Default 9600.
-*drivedelay* [0..31]::
+*drivedelay* [auto, 1..31]::
   The delay, in bit-times, before transmission begins after enabling the
-  transmitter hardware output driver. Default 1.
-*duplex* [full,half]::
+  transmitter hardware output driver. Default auto.
+*duplex* [full, half]::
   Whether 2-wire (half duplex) or 4-wire (full duplex) communication is set.
   Default half.
 *icdelay* [auto, 1..255]::
@@ -163,14 +163,14 @@ other setup values as attributes:
   omitted. If set manually, the 'txdelay' value should generally be larger
   than 'rxdelay' value. The value is limited to [1..255] for PktUART V2.
   Default auto.
-*stopbits* [1,2]::
+*stopbits* [1, 2]::
   Communication number of stopbits. This attribute requires PktUART V3+ to have
   any effect. Default 1.
 *suspend* [Boolean]::
   Start with suspended communication when set. This enables you to setup pin,
   scale and offset values in the HAL file(s) using setp/sets commands before
   data is written to any Modbus device. Default false.
-*timeout* [auto,10000..10000000]::
+*timeout* [auto, 10000..10000000]::
   The standard time a command may take in micro-seconds (send request plus
   handling plus receive reply) before the command is deemed lost. The special
   value of 'auto' will calculate an appropriate timeout value from the request
@@ -231,6 +231,10 @@ write functions. Write functions must have data defined to be sent.
 Each '<command>' entry may include a '<description>' tag, which serves as a
 user's comment.
 
+Note: if the driver starts in suspended mode (`supend="true"` in '<mesamodbus>'),
+then the '<initlist>' commands are first sent when the driver comes out of
+suspend.
+
 [source,xml]
 ----
 <initlist>
@@ -281,8 +285,8 @@ will then be emitted.
 
 The Modbus read functions `R_COILS` (`1`), `R_INPUTS` (`2`), `R_REGISTERS` (`3`) and
 `R_INPUTREGS` (`4`) are supported in the '<initlist>/<command>' but the returned
-data is ignored. Read functions are supported because some devices require a
-read function as a trigger.
+data is ignored and discarded. Read functions are supported because some
+devices require a read function as a trigger.
 
 Recognized '<initlist>/<command>' attributes when sending Modbus commands:
 
@@ -300,12 +304,12 @@ Recognized '<initlist>/<command>' attributes when sending Modbus commands:
   The Modbus device to communicate with. The 'device' attribute
   references '<device>[name]'. +
   The device name '`broadcast`' will send the command to all devices on the bus.
-*function* [see *MODBUS FUNCTIONS*]::
+*function* [see link:#_modbus_functions[*MODBUS FUNCTIONS*]]::
   The attribute value is one of the supported Modbus functions.
 *noanswer* [Boolean]::
   Set to true if a device does not return a reply to a command. This can be
   intentional if you send a command to a non-existing device. Default false.
-*timeout* [0..60000000]::
+*timeout* [auto, 1..60000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command in
   *micro-seconds* (send request plus handling plus receive reply) before the
   command is deemed lost. See also 'timeoutbits' below.
@@ -343,7 +347,7 @@ attributes:
 
 *baudrate* [1200..1000000]::
   Communication speed override.
-*drivedelay* [0..31]::
+*drivedelay* [auto, 1..31]::
   The TX driver delay override.
 *icdelay* [auto, 1..255]::
   The inter-character delay override.
@@ -351,14 +355,14 @@ attributes:
   Communication parity override.
 *rxdelay*, *txdelay* [auto, 1..1020]::
   Inter frame delay override.
-*stopbits* [1,2]::
+*stopbits* [1, 2]::
   Communication number of stopbits override.
 
 
 ==== Initialization data
 Recognized '<initlist>/<command>/<data>' attributes:
 
-*modbustype* [see *MODBUS TYPE*]::
+*modbustype* [see link:#_modbus_types[*MODBUS TYPES*]]::
   The destination format and translation of the 'value' attribute.
 *value*::
   The numerical value of the data to send. The format defaults to unsigned
@@ -492,9 +496,9 @@ Recognized '<commands>/<command>' attributes:
   The Modbus device to communicate with. The 'device' attribute
   references '<device>[name]'. +
   The device name '`broadcast`' will send the command to all devices on the bus.
-*function* [see *MODBUS FUNCTIONS*]::
+*function* [see link:#_modbus_functions[*MODBUS FUNCTIONS*]]::
   The attribute value is one of the supported Modbus functions.
-*haltype* [see *HAL TYPES*]::
+*haltype* [see link:#_hal_types[*HAL TYPES*]]::
   The HAL pin type for interactions. You do not need to specify this attribute
   for the Modbus functions read/write coil(s) or inputs, `R_COILS` (`1`),
   `R_INPUTS` (`2`), `W_COIL` (`5`) and `W_COILS` (`15`), as these always use
@@ -509,7 +513,7 @@ Recognized '<commands>/<command>' attributes:
   and it may be better to use an entry in the '<initlist>'. But sometimes you
   need to have other periodic commands before a 'once' marked command that
   cannot be achieved in the '<initlist>' sequence. Default '<mesamodbus>[interval]'.
-*modbustype* [see *MODBUS TYPES*]::
+*modbustype* [see link:#_modbus_types[*MODBUS TYPES*]]::
   The Modbus data mapping from/to register(s) for Modbus functions read/write
   register(s) `R_REGISTERS` (`3`), `R_INPUTREGS` (`4`), `W_REGISTER` (`6`) and
   `W_REGISTERS` (`16`). The default is U_AB if not specified.
@@ -544,7 +548,7 @@ Recognized '<commands>/<command>' attributes:
   ** read: `pin.name.scaled = ("readvalue" - pin.name.offset) * pin.name.scale`
   ** write: `"sendvalue" = (pin.name - pin.name.offset) * pin.name.scale`
 
-*timeout* [0..60000000]::
+*timeout* [auto, 1..60000000]::
   The override timeout of '<mesamodbus>[timeout]' for this command in
   *micro-seconds* (send request plus handling plus receive reply) before the
   command is deemed lost. See also 'timeoutbits' below.
@@ -605,9 +609,9 @@ Recognized '<commands>/<command>/<pin>' attributes:
 
 *clamp* [Boolean]::
   The clamp setting override for this pin.
-*haltype* [see *HAL TYPES*]::
+*haltype* [see link:#_hal_types[*HAL TYPES*]]::
   The HAL type override for this pin.
-*modbustype* [see *MODBUS TYPES*]::
+*modbustype* [see link:#_modbus_types[*MODBUS TYPES*]]::
   The Modbus type override for this pin.
 *name*::
   Specifies the pin name overriding the default '<command>[name]-xx' sequence.

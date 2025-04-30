@@ -101,7 +101,7 @@ CONFIGDEFAULT= {'baudrate'  : '9600',
                 'duplex'    : 'HALF',
                 'rxdelay'   : 'AUTO',
                 'txdelay'   : 'AUTO',
-                'drivedelay': '1',
+                'drivedelay': 'AUTO',
                 'icdelay'   : 'AUTO',
                 'interval'  : '0',
                 'suspend'   : '0',
@@ -513,6 +513,10 @@ def verifyConfigParams(cfg):
     if 'AUTO' == cfg['txdelay']:
         cfg['txdelay'] = '0'
 
+    # Auto drive-delay will set it according to stopbits
+    if 'AUTO' == cfg['drivedelay']:
+        cfg['drivedelay'] = '0'
+
     # Set inter-character delay to auto calculation in driver
     if 'AUTO' == cfg['icdelay']:
         cfg['icdelay'] = '0'
@@ -657,11 +661,14 @@ def calcTimeout(function, count, mtype, cfgp):
 #
 def getTimeout(attrib, ers):
     if 'timeout' in attrib:
-        # A specific timeout for this command
-        tov = checkInt(attrib, 'timeout')
-        if None == tov or tov < 0 or tov > MAXDELAY:
-            perr("Attribute 'timeout' out of range [0..{}] in {}".format(MAXDELAY, ers))
-            return None
+        if "AUTO" == attrib['timeout'].upper():
+            tov = 0
+        else:
+            # A specific timeout for this command
+            tov = checkInt(attrib, 'timeout')
+            if None == tov or tov < 1 or tov > MAXDELAY:
+                perr("Attribute 'timeout' out of range [1..{}] in {}".format(MAXDELAY, ers))
+                return None
         if 'timeoutbits' in attrib:
             pwarn("Attribute 'timeout' has preference over 'timeoutbits' in {}".format(ers))
     elif 'timeoutbits' in attrib:
@@ -1462,7 +1469,7 @@ def main():
         print("  icdelay   : {}".format(getAutoFmt(configparams['icdelay'], "bits")))
         print("  rxdelay   : {}".format(getAutoFmt(configparams['rxdelay'], "bits")))
         print("  txdelay   : {}".format(getAutoFmt(configparams['txdelay'], "bits")))
-        print("  drivedelay: {} bits".format(configparams['drivedelay']))
+        print("  drivedelay: {}".format(getAutoFmt(configparams['drivedelay'], "bits")))
         print("  timeout   : {}".format(getAutoFmt(configparams['timeout'], "microseconds")))
         print("  suspend   : {}".format("true" if configparams['suspend'] else "false"))
 
