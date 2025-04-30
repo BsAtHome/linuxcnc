@@ -733,6 +733,10 @@ def checkAttribs(have, may, suffix):
 #
 #
 def printCommsOverride(cfgs, cnt):
+    if sum([cfgs[k] != configparams[k] for k in RATEATTRIB]) == 0:
+        print("Init {:2}: Comms set to defaults".format(cnt))
+        return
+
     print("Init {:2}: Comms override: baudrate={}, parity={}, stopbits={}, rxdelay={}, txdelay={}, drivedelay={}, icdelay={}"
             .format(cnt, cfgs['baudrate'], ['None','Odd','Even', ''][cfgs['parity']], cfgs['stopbits'],
                     getAutoFmt(cfgs['rxdelay'], ""), getAutoFmt(cfgs['txdelay'], ""),
