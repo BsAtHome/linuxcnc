@@ -148,7 +148,6 @@ static inline unsigned mtypesize(unsigned mtype) {
 enum {
 	STATE_START = 0,
 	STATE_WAIT_FOR_TIMEOUT,
-	STATE_WAIT_FOR_SEND_BEGIN,
 	STATE_WAIT_FOR_SEND_COMPLETE,
 	STATE_WAIT_FOR_DATA_FRAME,
 	STATE_FETCH_DATA,
@@ -162,7 +161,6 @@ enum {
 static const char *state_names[] = {
 	"STATE_START",
 	"STATE_WAIT_FOR_TIMEOUT",
-	"STATE_WAIT_FOR_SEND_BEGIN",
 	"STATE_WAIT_FOR_SEND_COMPLETE",
 	"STATE_WAIT_FOR_DATA_FRAME",
 	"STATE_FETCH_DATA",
@@ -793,12 +791,7 @@ retry_next_init:
 					// next_command() switches pointers on end of inits.
 					break;
 				}
-				if(hasnoanswer(cc)) {
-					// Just wait a moment (user should set appropriate timeout)
-					set_state(inst, STATE_WAIT_FOR_TIMEOUT);
-				} else {
-					set_state(inst, STATE_WAIT_FOR_SEND_BEGIN);
-				}
+				set_state(inst, STATE_WAIT_FOR_SEND_COMPLETE);
 			}
 			break;	// Init command sent
 		}
@@ -875,7 +868,7 @@ retry_next_init:
 					queue_reset(inst);
 					break;
 				} else {
-					set_state(inst, STATE_WAIT_FOR_SEND_BEGIN);
+					set_state(inst, STATE_WAIT_FOR_SEND_COMPLETE);
 					break;
 				}
 			}
@@ -914,16 +907,6 @@ retry_next_init:
 		}
 		break;
 
-	case STATE_WAIT_FOR_SEND_BEGIN:
-		// Single cycle delay to allow for queued flush
-		// This should give enough time for the Tx to become busy and maybe
-		// even done again.
-#ifdef DEBUG_STATE
-		MSG_DBG("WAIT_FOR_SEND_BEGIN txstatus=0x%08x rxstatus=0x%08x\n", txstatus, rxstatus);
-#endif
-		set_state(inst, STATE_WAIT_FOR_SEND_COMPLETE);
-		break;
-
 	case STATE_WAIT_FOR_SEND_COMPLETE:
 #ifdef DEBUG_STATE
 		{
@@ -936,8 +919,8 @@ retry_next_init:
 		}
 #endif
 		if(!(txstatus & HM2_PKTUART_TXMODE_TXBUSY)) {
-			const hm2_modbus_cmd_t *cmd = current_cmd(inst);
-			if((!cmd->cmd.mbid && !hasbcanswer(cmd)) || (cmd->cmd.mbid && hasnoanswer(cmd))) {
+			const hm2_modbus_cmd_t *cc = current_cmd(inst);
+			if((!cc->cmd.mbid && !hasbcanswer(cc)) || (cc->cmd.mbid && hasnoanswer(cc))) {
 				// Broadcasts have no reply. Unless the equipment is badly
 				// behaved and we have set flag to handle the case. Or,
 				// non-broadcasts which are marked to produce no answer.
@@ -2840,12 +2823,12 @@ int rtapi_app_main(void)
 					comp_id, "%s.command.%02d.reset", inst->name, c));
 
 			// Now create the pins associated with the command
-			hm2_modbus_cmd_t *cmd = &inst->_cmds[c];
+			hm2_modbus_cmd_t *cc = &inst->_cmds[c];
 			int dir = HAL_IN;
-			const rtapi_u8 *dptr = inst->dataptr + cmd->cmd.cdataptr;
-			cmd->pinref = p;
-			for(int j = 0; j < cmd->cmd.cpincnt; j++) {
-				switch(cmd->cmd.func) {
+			const rtapi_u8 *dptr = inst->dataptr + cc->cmd.cdataptr;
+			cc->pinref = p;
+			for(int j = 0; j < cc->cmd.cpincnt; j++) {
+				switch(cc->cmd.func) {
 				case MBCMD_R_COILS:
 				case MBCMD_R_INPUTS:
 					dir = HAL_OUT;
@@ -2862,7 +2845,7 @@ int rtapi_app_main(void)
 					/* Fallthrough */
 				case MBCMD_W_REGISTER:	// This has guaranteed pincnt == 1
 				case MBCMD_W_REGISTERS:
-					switch(cmd->typeptr[j].htype) {
+					switch(cc->typeptr[j].htype) {
 					default:
 					case HAL_BIT:
 						CHECK(hal_pin_bit_newf(dir, (hal_bit_t**)&(inst->hal->pins[p++]),
@@ -2882,14 +2865,14 @@ int rtapi_app_main(void)
 					case HAL_S32:
 						CHECK(hal_pin_s32_newf(dir, (hal_s32_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
-						if(haspinscale(&cmd->typeptr[j])) {
+						if(haspinscale(&cc->typeptr[j])) {
 							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
-								switch(mtypetype(cmd->typeptr[j].mtype)) {
+								switch(mtypetype(cc->typeptr[j].mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
@@ -2913,14 +2896,14 @@ int rtapi_app_main(void)
 					case HAL_S64:
 						CHECK(hal_pin_s64_newf(dir, (hal_s64_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
-						if(haspinscale(&cmd->typeptr[j])) {
+						if(haspinscale(&cc->typeptr[j])) {
 							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
-								switch(mtypetype(cmd->typeptr[j].mtype)) {
+								switch(mtypetype(cc->typeptr[j].mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
@@ -2944,14 +2927,14 @@ int rtapi_app_main(void)
 					case HAL_FLOAT:
 						CHECK(hal_pin_float_newf(dir, (hal_float_t**)&(inst->hal->pins[p]),
 								comp_id, "%s.%s", inst->name, CPTR(dptr)));
-						if(haspinscale(&cmd->typeptr[j])) {
+						if(haspinscale(&cc->typeptr[j])) {
 							CHECK(hal_pin_float_newf(HAL_IN, &(inst->hal->pins[p].scale),
 									comp_id, "%s.%s.scale", inst->name, CPTR(dptr)));
 							*(inst->hal->pins[p].scale) = 1.0;
 							if(HAL_OUT == dir) {
 								CHECK(hal_pin_float_newf(HAL_OUT, &(inst->hal->pins[p].scaled),
 										comp_id, "%s.%s.scaled", inst->name, CPTR(dptr)));
-								switch(mtypetype(cmd->typeptr[j].mtype)) {
+								switch(mtypetype(cc->typeptr[j].mtype)) {
 								case MBT_U:
 									CHECK(hal_pin_u64_newf(HAL_IN, (hal_u64_t**)&(inst->hal->pins[p].offset),
 											comp_id, "%s.%s.offset", inst->name, CPTR(dptr)));
