@@ -52,6 +52,9 @@ typedef unsigned long rtapi_mutex_t;
     static __inline__ void rtapi_mutex_give(unsigned long *mutex) {
 	test_and_clear_bit(0, mutex);
     }
+    static __inline__ void rtapi_mutex_give_rd(unsigned long *mutex) {
+	test_and_set_bit(0, mutex);
+    }
 /**
  * @brief Non-blocking attempt to get the mutex.
  *
@@ -67,6 +70,9 @@ typedef unsigned long rtapi_mutex_t;
     static __inline__ int rtapi_mutex_try(unsigned long *mutex) {
 	return test_and_set_bit(0, mutex);
     }
+    static __inline__ int rtapi_mutex_try_rd(unsigned long *mutex) {
+	return !test_and_clear_bit(0, mutex);
+    }
 
 /**
  * @brief Blocking attempt to gGet the mutex.
@@ -78,6 +84,15 @@ typedef unsigned long rtapi_mutex_t;
  */
     static __inline__ void rtapi_mutex_get(unsigned long *mutex) {
 	while (test_and_set_bit(0, mutex)) {
+#if defined(__KERNEL__)
+	    schedule();
+#else
+	    sched_yield();
+#endif
+	}
+    }
+    static __inline__ void rtapi_mutex_get_rd(unsigned long *mutex) {
+	while (!test_and_clear_bit(0, mutex)) {
 #if defined(__KERNEL__)
 	    schedule();
 #else

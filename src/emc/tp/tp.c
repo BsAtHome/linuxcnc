@@ -384,11 +384,11 @@ STATIC inline double tpGetSignedSpindlePosition(spindle_status_t *status) {
 #ifdef MAKE_TP_HAL_PINS // {
 static struct  tp_haldata {
   // Example pin pointers
-  hal_u32_t *in;
-  hal_u32_t *out;
+  hal_uint_t in;
+  hal_uint_t out;
   // Example parameters
-  hal_float_t param_rw;
-  hal_float_t param_ro;
+  hal_real_t param_rw;
+  hal_real_t param_ro;
 } *tp_haldata;
 
 static int makepins(int id) {
@@ -399,12 +399,12 @@ static int makepins(int id) {
     if (!tp_haldata) goto error;
 
     // hal pin examples:
-    res += hal_pin_u32_newf(HAL_IN ,&(tp_haldata->in) ,id,"%s.in" ,HAL_PREFIX);
-    res += hal_pin_u32_newf(HAL_OUT,&(tp_haldata->out),id,"%s.out",HAL_PREFIX);
+    res += hal_pin_new_ui32(id, HAL_IN,  &(tp_haldata->in),  0, "%s.in",  HAL_PREFIX);
+    res += hal_pin_new_ui32(id, HAL_OUT, &(tp_haldata->out), 0, "%s.out", HAL_PREFIX);
 
     // hal parameter examples:
-    res += hal_param_float_newf(HAL_RW, &tp_haldata->param_rw,id,"%s.param-rw",HAL_PREFIX);
-    res += hal_param_float_newf(HAL_RO, &tp_haldata->param_ro,id,"%s.param-ro",HAL_PREFIX);
+    res += hal_param_new_real(id, HAL_RW, &tp_haldata->param_rw, 0.0, "%s.param-rw", HAL_PREFIX);
+    res += hal_param_new_real(id, HAL_RO, &tp_haldata->param_ro, 0.0, "%s.param-ro", HAL_PREFIX);
 
     if (res) goto error;
     rtapi_print("@@@ %s:%s: ok\n",__FILE__,__FUNCTION__);

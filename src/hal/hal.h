@@ -134,9 +134,12 @@ RTAPI_BEGIN_DECLS
 #include <signal.h>
 #endif
 
+#include "rtapi_stdint.h"
+#include "rtapi_bool.h"
 #include "rtapi_errno.h"
 
-#define HAL_NAME_LEN     47	/* length for pin, signal, etc, names */
+#define HAL_NAME_LEN     55	/* length for pin, signal, etc, names */
+#define HAL_PSEUDO_COMP_PREFIX "__" /* prefix to identify a pseudo component */
 
 /** These locking codes define the state of HAL locking, are used by most functions */
 /** The functions locked will return a -EPERM error message **/
@@ -172,6 +175,23 @@ RTAPI_BEGIN_DECLS
     realtime code.
 */
 extern int hal_init(const char *name);
+
+// hal_is_init() returns the current state of HAL for the calling process. It
+// determines whether hal_init() has been called by checking whether the shared
+// memory segment is present.
+// The return value is one (1) if HAL is initialized and zero (0) if not.
+int hal_is_init(void);
+
+#ifdef ULAPI
+// hal_lib_init() will instantiate an rtapi application (HAL_LIB_<pid>) and map
+// the shared HAL memory segment.
+// Only user-space applications linking to hal_lib can initialize the library.
+// This is useful for any program wishing to do set[ps]/get[ps]/etc. which do
+// not need a component and can be run on name basis. Any hal_lib function that
+// does not require an associated component can be executed with HAL shared
+// memory mapped.
+int hal_lib_init(void);
+#endif
 
 /** 'hal_exit()' must be called before a HAL component exits, to
     free resources associated with the component.
@@ -235,7 +255,7 @@ extern int hal_unready(int comp_id);
 /** hal_comp_name() returns the name of the given component, or NULL
     if comp_id is not a loaded component
 */
-extern char* hal_comp_name(int comp_id);
+extern const char *hal_comp_name(int comp_id);
 
 /** hal_get_realtime_type() returns the type of the running real time
 */
@@ -290,46 +310,78 @@ typedef enum {
     HAL_TYPE_MAX,
 } hal_type_t;
 
-/** HAL pins have a direction attribute.  A pin may be an input to 
-    the HAL component, an output, or it may be bidirectional.
-    Any number of HAL_IN or HAL_IO pins may be connected to the same
-    signal, but only one HAL_OUT pin is permitted.  This is equivalent
-    to connecting two output pins together in an electronic circuit.
-    (HAL_IO pins can be thought of as tri-state outputs.)
-*/
+#define HAL_BOOL HAL_BIT
+#define HAL_REAL HAL_FLOAT
+#define HAL_SINT HAL_S64
+#define HAL_UINT HAL_U64
 
+//
+// hal_pdir_t - Unified HAL pin/param direction type. Specifies the direction
+// of the pins and params while simultaneously allowing us to deduce whether we
+// are dealing with a pin or a param.
+//
+// HAL pins have a direction attribute. A pin may be an input to the HAL
+// component, an output, or it may be bidirectional. Any number of HAL_IN or
+// HAL_IO pins may be connected to the same signal, but only one HAL_OUT pin is
+// permitted. This is equivalent to connecting two output pins together in an
+// electronic circuit. (HAL_IO pins can be thought of as tri-state outputs.)
+//
+// HAL parameters also have a direction attribute. For parameters, the
+// attribute determines whether the user can write the value of the parameter,
+// or simply read it. HAL_RO parameters are read-only, and HAL_RW ones are
+// writable with 'halcmd setp'.
+//
 typedef enum {
     HAL_DIR_UNSPECIFIED = -1,
-    HAL_IN = 16,
-    HAL_OUT = 32,
-    HAL_IO = (HAL_IN | HAL_OUT),
-} hal_pin_dir_t;
+    HAL_IN  = (1 << 4),
+    HAL_OUT = (1 << 5),
+    HAL_IO  = (HAL_IN | HAL_OUT),
+    HAL_RO  = (1 << 6),
+    HAL_WO  = (1 << 7), // Actually fake value not enforced
+    HAL_RW  = HAL_RO | HAL_WO,
+} hal_pdir_t;
 
-/** HAL parameters also have a direction attribute.  For parameters,
-    the attribute determines whether the user can write the value
-    of the parameter, or simply read it.  HAL_RO parameters are
-    read-only, and HAL_RW ones are writable with 'halcmd setp'.
-*/
+// Map both old direction types to the new combined type
+// FIXME: These should be retired at some point
+typedef hal_pdir_t hal_pin_dir_t;
+typedef hal_pdir_t hal_param_dir_t;
 
-typedef enum {
-    HAL_RO = 64,
-    HAL_RW = HAL_RO | 128 /* HAL_WO */,
-} hal_param_dir_t;
+#define __HAL_ALWAYS_INLINE __attribute__((always_inline))
 
-/* Use these for x86 machines, and anything else that can write to
-   individual bytes in a machine word. */
-#include "rtapi_bool.h"
-#include "rtapi_stdint.h"
+//
+// bool hal_pdir_is_pin(hal_pdir_t)
+// bool hal_pdir_is_param(hal_pdir_t)
+// bool hal_pdir_is_neither(hal_pdir_t)
+//
+// Determine whether an I/O direction is a pin, a param or neither.
+//
+static inline __HAL_ALWAYS_INLINE bool hal_pdir_is_pin(hal_pdir_t v) {
+    // No other bits than in HAL_IO may be set
+    return (0 == (v & ~HAL_IO)) && (0 != (v & HAL_IO));
+}
+static inline __HAL_ALWAYS_INLINE bool hal_pdir_is_param(hal_pdir_t v) {
+    // No other bits than in HAL_RW may be set
+    return (0 == (v & ~HAL_RW)) && (0 != (v & HAL_RW));
+}
+static inline __HAL_ALWAYS_INLINE bool hal_pdir_is_neither(hal_pdir_t v) {
+    // Any other bits than in HAL_IO|HAL_RW set or none of the set's bits
+    return (0 != (v & ~(HAL_IO|HAL_RW))) || (0 == (v & (HAL_IO|HAL_RW)));
+}
+
+// FIXME: These alignment attributes should be removed.
+// HAL now allocates on an 8-byte boundary and the rest should be left to the
+// compiler.
+// ==> Remove when we get rid of old hal_*_t typedefs. <==
+typedef rtapi_real real_t;
+typedef rtapi_u64 ireal_t __attribute__((aligned(8))); // integral type as wide as real_t / hal_float_t
+
 typedef volatile bool hal_bit_t;
 typedef volatile rtapi_u32 hal_u32_t;
 typedef volatile rtapi_s32 hal_s32_t;
 typedef volatile rtapi_u64 hal_u64_t;
 typedef volatile rtapi_s64 hal_s64_t;
-typedef volatile int hal_port_t;
-typedef double real_t __attribute__((aligned(8)));
-typedef rtapi_u64 ireal_t __attribute__((aligned(8))); // integral type as wide as real_t / hal_float_t
-
-#define hal_float_t volatile real_t
+typedef volatile real_t hal_float_t;
+typedef volatile rtapi_port hal_port_t;
        
 /** HAL "data union" structure
  ** This structure may hold any type of hal data
@@ -343,6 +395,184 @@ typedef union {
     hal_s64_t ls;
     hal_u64_t lu;
 } hal_data_u;
+
+// Fake forward declarations so we can make opaque pointers
+struct __hal_stype_bool_t;
+struct __hal_stype_sint_t;
+struct __hal_stype_uint_t;
+struct __hal_stype_real_t;
+struct __hal_stype_port_t;
+
+typedef struct __hal_stype_bool_t *hal_bool_t;
+typedef struct __hal_stype_sint_t *hal_sint_t;
+typedef struct __hal_stype_uint_t *hal_uint_t;
+typedef struct __hal_stype_real_t *hal_real_t;
+//typedef struct __hal_stype_port_t *hal_port_t;
+
+typedef union {
+    hal_bool_t b;
+    hal_sint_t s;
+    hal_uint_t u;
+    hal_real_t r;
+    //hal_port_t p;
+} hal_refs_u;
+
+// We rely on little-endian memory layout in the union where the smaller
+// types are overlapping the larger type's least significant part.
+#include "rtapi_byteorder.h"
+#if !RTAPI_LITTLE_ENDIAN
+#error "HAL only supports little endian machines at this moment."
+#endif
+
+// This is a define so we don't export it to other code.
+// It is undef'ed after we're done with it.
+// FIXME: Get rid of the 32-bit types when we have upgraded everything using
+// getter/setter access only so we have guaranteed content.
+#define __HAL_MAPPED_TYPE union __hal_mapped_type { \
+        volatile rtapi_bool _b; \
+        volatile rtapi_s32  _ss; \
+        volatile rtapi_u32  _su; \
+        volatile rtapi_sint _s; \
+        volatile rtapi_uint _u; \
+        volatile rtapi_real _r; \
+    }
+
+
+#if 0
+// The port change must be done later
+// A 'hal_port_t' is a pin/param reference which content represents
+// the integer offset in the HAL shared memory segment to a
+// hal_port_shm_t structure.
+static inline __HAL_ALWAYS_INLINE rtapi_sint hal_get_port(hal_port_t ref) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_s;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_sint hal_set_port(hal_port_t ref, rtapi_sint val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_s = val; // Store in the larger type
+    return val;
+}
+#endif
+//
+// The hal_{get,set}_si32() and hal_{get,set}_ui32() are only present for
+// compatibility. They may be removed when all the remaining code has been
+// updated properly. However, there is a case for letting them remain as
+// they will simply use implicit truncation.
+// The hal_get_{s,u}i32_clamped() functions will not truncate but clamp the
+// read value to the appropriate min/max of the 32-bit type.
+//
+static inline __HAL_ALWAYS_INLINE rtapi_s32 hal_get_si32_clamped(const hal_sint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // Down conversion from the larger type
+    // cppcheck-suppress dangerousTypeCast
+    rtapi_sint val = ((union __hal_mapped_type *)ref)->_s;
+    if(val <= RTAPI_INT32_MIN) return RTAPI_INT32_MIN;
+    if(val >= RTAPI_INT32_MAX) return RTAPI_INT32_MAX;
+    return (rtapi_s32)val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_s32 hal_get_si32(const hal_sint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // Implicitly Truncated from the larger type
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_ss;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_s32 hal_set_si32(hal_sint_t ref, rtapi_s32 val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_s = val; // Store in the larger type
+    return val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_u32 hal_get_ui32_clamped(const hal_uint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // Down conversion from the larger type
+    // cppcheck-suppress dangerousTypeCast
+    rtapi_uint val = ((union __hal_mapped_type *)ref)->_u;
+    if(val >= RTAPI_UINT32_MAX) return RTAPI_UINT32_MAX;
+    return (rtapi_u32)val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_u32 hal_get_ui32(const hal_uint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // Implicitly Truncated from the larger type
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_su;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_u32 hal_set_ui32(hal_uint_t ref, rtapi_u32 val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_u = val; // Store in the larger type
+    return val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_sint hal_get_sint(const hal_sint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_s;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_sint hal_set_sint(hal_sint_t ref, rtapi_sint val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_s = val;
+    return val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_uint hal_get_uint(const hal_uint_t ref) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_u;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_uint hal_set_uint(hal_uint_t ref, rtapi_uint val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_u = val;
+    return val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_real hal_get_real(const hal_real_t ref) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_r;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_real hal_set_real(hal_real_t ref, rtapi_real val) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_r = val;
+    return val;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_bool hal_get_bool(const hal_bool_t ref) {
+    __HAL_MAPPED_TYPE;
+    // cppcheck-suppress dangerousTypeCast
+    return ((union __hal_mapped_type *)ref)->_b;
+}
+static inline __HAL_ALWAYS_INLINE rtapi_bool hal_set_bool(hal_bool_t ref, rtapi_bool val) {
+    __HAL_MAPPED_TYPE;
+    // 'val' is declared bool and will therefore store a one (1)
+    // or a zero (0) in the larger target. This still works if the
+    // call is made using an integer type as original argument.
+    // cppcheck-suppress dangerousTypeCast
+    ((union __hal_mapped_type *)ref)->_u = val;
+    return val;
+}
+#undef __HAL_ALWAYS_INLINE
+#undef __HAL_MAPPED_TYPE
+
+#define __HAL_PFMT(a,b) __attribute__((format(printf,a,b)))
+int hal_pin_new_bool(int compid, hal_pdir_t dir, hal_bool_t *ref, rtapi_bool def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_pin_new_si32(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_s32  def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_pin_new_ui32(int compid, hal_pdir_t dir, hal_uint_t *ref, rtapi_u32  def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_pin_new_sint(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_sint def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_pin_new_uint(int compid, hal_pdir_t dir, hal_uint_t *ref, rtapi_uint def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_pin_new_real(int compid, hal_pdir_t dir, hal_real_t *ref, rtapi_real def, const char *fmt, ...) __HAL_PFMT(5,6);
+// Note: port has no initial default as it is an 'internal' reference
+// FIXME: This needs to change into hal_port_t argument when we break the API
+int hal_pin_new_port(int compid, hal_pin_dir_t dir, hal_sint_t *ref, const char *fmt, ...) __HAL_PFMT(4,5);
+
+int hal_param_new_bool(int compid, hal_pdir_t dir, hal_bool_t *ref, rtapi_bool def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_si32(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_s32  def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_ui32(int compid, hal_pdir_t dir, hal_uint_t *ref, rtapi_u32  def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_sint(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_sint def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_uint(int compid, hal_pdir_t dir, hal_uint_t *ref, rtapi_uint def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_real(int compid, hal_pdir_t dir, hal_real_t *ref, rtapi_real def, const char *fmt, ...) __HAL_PFMT(5,6);
+int hal_param_new_fake(int compid, hal_refs_u *refs);
+#undef __HAL_PFMT
 
 /***********************************************************************
 *                      "LOCKING" FUNCTIONS                             *
@@ -630,12 +860,12 @@ extern int hal_param_new(const char *name, hal_type_t type, hal_param_dir_t dir,
     On success, the hal_param_xxx_set() functions return 0,
     and on failure they return a negative error code.
 */
-extern int hal_param_bit_set(const char *name, int value);
-extern int hal_param_float_set(const char *name, double value);
-extern int hal_param_u32_set(const char *name, unsigned long value);
-extern int hal_param_s32_set(const char *name, signed long value);
-extern int hal_param_u64_set(const char *name, unsigned long value);
-extern int hal_param_s64_set(const char *name, signed long value);
+int hal_param_bit_set(const char *name, int value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_float_set(const char *name, double value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_u32_set(const char *name, unsigned long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_s32_set(const char *name, signed long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_u64_set(const char *name, unsigned long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_s64_set(const char *name, signed long value) __attribute__((deprecated("Use hal_set_p()")));
 
 /** 'hal_param_alias()' assigns an alternate name, aka an alias, to
     a parameter.  Once assigned, the parameter can be referred to by
@@ -659,7 +889,7 @@ extern int hal_param_alias(const char *pin_name, const char *alias);
     If successful, hal_param_set() returns 0.  On failure
     it returns a negative error code.
 */
-extern int hal_param_set(const char *name, hal_type_t type, void *value_addr);
+int hal_param_set(const char *name, hal_type_t type, void *value_addr) __attribute__((deprecated("Use hal_set_p()")));
 
 /***********************************************************************
 *                 PIN/SIG/PARAM GETTER FUNCTIONS                       *
@@ -854,7 +1084,7 @@ extern int hal_stop_threads(void);
     instance of its component.  Return value is >=0 for success,
     <0 for error.
 */
-typedef int(*constructor)(char *prefix, char *arg);
+typedef int(*constructor)(const char *prefix, const char *arg);
 
 /** hal_set_constructor() sets the constructor function for this component
 */
@@ -1106,6 +1336,204 @@ static inline rtapi_s64 hal_extend_counter(rtapi_s64 old, rtapi_s64 newlow, int 
     return (rtapi_u64)old + (diff_shifted >> nshift); // unsigned to avoid signed overflow
 }
 
+//***********************************************************************
+// Mapping/umapping HAL memory segment pointers
+//***********************************************************************
+
+// Pointers into HAL memory are dependent on process memory. Transporting them
+// between processes does not work. These need to be handled as offsets from
+// where the memory is mapped.
+rtapi_intptr_t hal_reference_unmap(const void *ref);
+void *hal_reference_map(rtapi_intptr_t ref);
+
+//***********************************************************************
+//
+// User-land only functions to query HAL's internals
+//
+//***********************************************************************
+
+// Query type of a HAL item
+typedef enum {
+    HAL_QTYPE_ANY = 0,
+    HAL_QTYPE_PIN,
+    HAL_QTYPE_PARAM,
+    HAL_QTYPE_SIGNAL,
+    HAL_QTYPE_COMP,
+    HAL_QTYPE_FUNCT,
+    HAL_QTYPE_THREAD,
+    HAL_QTYPE_THREAD_FUNCT,
+} hal_qtype_t;
+
+// HAL 'component' type.
+//    Assigned according to RTAPI and ULAPI definitions.
+// FIXME: Enums should be named HAL_COMP_TYPE_xxx
+typedef enum {
+    COMPONENT_TYPE_UNKNOWN = -1,
+    COMPONENT_TYPE_USER,
+    COMPONENT_TYPE_REALTIME,
+    COMPONENT_TYPE_OTHER
+} hal_comp_type_t;
+
+typedef struct {
+    hal_comp_type_t type; // Component type (name in query struct)
+    int comp_id;          // Component ID (RTAPI module id)
+    int pid;              // PID of component (user components only)
+    bool ready;           // True if ready, false if not
+    const char *insmod;   // Arguments passed via insmod or NULL if none present
+} hal_query_comp_t;
+
+typedef struct {
+    int comp_id;          // Component ID
+    const char *comp;     // Component's name
+    int users;            // Number of threads using function
+    rtapi_intptr_t arg;   // Argument for function
+    rtapi_intptr_t funct; // Pointer to function code
+    bool reentrant;       // True if function is re-entrant
+    bool uses_fp;         // Legacy: Always true
+} hal_query_funct_t;
+
+typedef struct {
+    int comp_id;          // Owning component
+    const char *comp;     // Component's name
+    int priority;         // Thread priority
+    long int period;      // Thread period in nsec
+    int functidx;         // Function iteration counter
+    const char *funct;    // Attached function name
+    bool is_init;         // True if funct is an init function
+    bool uses_fp;         // Legacy: Always true
+} hal_query_thread_t;
+
+typedef union {
+    rtapi_bool b;   // values used in hal_[gs]et_[ps]
+    rtapi_sint s;
+    rtapi_uint u;
+    rtapi_real r;
+} hal_query_value_t;
+
+typedef struct {
+    hal_type_t type;    // Request: Enforce specific type (any when <= 0); Return: HAL_XXX type
+    hal_refs_u ref;     // Return: Value reference
+    hal_pdir_t dir;     // Return: pin/param direction
+    hal_query_value_t value; // Request: Must be set by the callback; Return(get_s,get_p): value read
+    const char *alias;  // Return: non-NULL if there is an alias name
+    const char *signal; // Return: get_p/getref_p/list_p signal name if connected
+    const char *comp;   // Return: Owner's name (component name)
+    int comp_id;        // Return: Owner ID
+} hal_query_pp_t;
+
+typedef struct {
+    hal_type_t type;    // Request: Enforce specific type (any when <= 0); Return: HAL_XXX type
+    hal_refs_u ref;     // Return: Value reference
+    int writers;        // Return: Number of writer pins attached to the signal
+    int readers;        // Return: Number of reader pins attached to the signal
+    int bidirs;         // Return: Number of bidirectional pins attached to the signal
+    hal_query_value_t value; // Request: Must be set by the callback; Return(gets,getp): value read
+} hal_query_sig_t;
+
+//
+// HAL query structure used both for input and output
+//
+typedef struct {
+    const char *name;
+    hal_qtype_t qtype;             // Request: limit search; Return: Connection type found
+    union {
+        void *pval;
+        rtapi_intptr_t ival;
+        rtapi_uintptr_t uval;
+    } callerdata;   // Caller private data additional to 'arg'
+    union {
+        // Return: data specific according to conn type
+        hal_query_pp_t     pp;     // Pins, params
+        hal_query_sig_t    sig;    // Signals
+        hal_query_comp_t   comp;   // Components
+        hal_query_funct_t  funct;  // Functions
+        hal_query_thread_t thread; // Threads
+    };
+} hal_query_t;
+
+// Callback prototype
+typedef int (*hal_query_cb)(hal_query_t *query, void *arg);
+
+// Pin/Param/Signal setters based on name
+// get_p/set_p - get or set pin or param
+// get_s/set_s - get or set signal
+// getref_p    - return the pin/param reference for hal_[gs]et_xxxx()
+// getref_s    - return the signal reference for hal_[gs]et_xxxx()
+//
+// set_s(): If the type is HAL_PORT, then the action sets the port's
+//          queue size according to the `query->value.s` setting.
+//
+// set_p/set_s: The callback function is called after it is determined that
+// the name exists and optionally if the type matches. The setter calls the
+// callback with the mutex *locked* and it should operate as fast as possible.
+// If the setter 'cb' callback is NULL, then it is required that you set both
+// the query->type to the proper type and the matching query->value field to
+// its associated value.
+//
+// get_p/get_s: The callback function is called after it is determined that
+// the name exists and optionally if the type matches. The getter calls the
+// callback with the mutex *unlocked* and the appropriate query->value field is
+// set to the value read, according to the type. If the getter 'cb' callback is
+// NULL, then it is simply skipped.
+//
+// For both getter and setter functions: The callback should return zero when
+// it succeeds and a negative errno value on error. If the callback returns an
+// error, then both getter and setter will return that value.
+//
+//
+int hal_getref_p(hal_query_t *query);
+int hal_get_p(hal_query_t *query, hal_query_cb cb, void *arg);
+int hal_set_p(hal_query_t *query, hal_query_cb cb, void *arg);
+int hal_list_p(hal_query_t *q, hal_query_cb cb, void *arg);
+int hal_list_p_s(hal_query_t *q, hal_query_cb cb, void *arg);
+
+int hal_getref_s(hal_query_t *query);
+int hal_get_s(hal_query_t *query, hal_query_cb cb, void *arg);
+int hal_set_s(hal_query_t *query, hal_query_cb cb, void *arg);
+int hal_list_s(hal_query_t *q, hal_query_cb cb, void *arg);
+
+int hal_list_comp(hal_query_t *q, hal_query_cb cb, void *arg);
+int hal_list_funct(hal_query_t *q, hal_query_cb cb, void *arg);
+int hal_list_thread(hal_query_t *q, hal_query_cb cb, void *arg);
+
+int hal_comp_status_name(const char *name, hal_query_t *q);
+int hal_comp_status_id(int comp_id, hal_query_t *q);
+
+typedef struct {
+    rtapi_sint mem_total;
+    rtapi_sint mem_free;
+    int ncomps;
+    int ncomps_free;
+    int npins;
+    int npins_free;
+    int nparams;
+    int nparams_free;
+    int naliases;
+    int naliases_free;
+    int nsignals;
+    int nsignals_free;
+    int nthreads;
+    int nthreads_free;
+    int nfuncts;
+    int nfuncts_free;
+} hal_statistics_t;
+
+int hal_statistics(hal_statistics_t *sts);
+
+// Release the HAL mutex with brute force
+int hal_mutex_force_release(void);
+
+// HAL will pretend that the exact base period requested is possible.
+// This mode is not suitable for running real hardware.
+// Returns zero (0) on success or a negative -EACCES error if already set.
+int hal_enforce_exact_base_period(void);
+
+// Invoke the constructor for a new instance
+int hal_comp_invoke_make(const char *compname, const char *newname, const char *arg);
+
+// Add the insmod arguments to a named (just loaded) component
+// The 'args' argument must be in HAL memory.
+int hal_comp_insmod_args(const char *compname, const char *args);
 
 RTAPI_END_DECLS
 
