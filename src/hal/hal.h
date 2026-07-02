@@ -278,7 +278,7 @@ const char *hal_strerror(int err);
 /** hal_comp_name() returns the name of the given component, or NULL
     if comp_id is not a loaded component
 */
-extern char* hal_comp_name(int comp_id);
+extern const char *hal_comp_name(int comp_id);
 
 /** hal_get_realtime_type() returns the type of the running real time
 */
@@ -396,15 +396,15 @@ static inline __HAL_ALWAYS_INLINE bool hal_pdir_is_neither(hal_pdir_t v) {
 // compiler.
 // ==> Remove when we get rid of old hal_*_t typedefs. <==
 typedef rtapi_real real_t;
-typedef rtapi_u64 ireal_t __attribute__((aligned(8))); // integral type as wide as real_t / hal_float_t
+typedef rtapi_u64 ireal_t __attribute__((aligned(8))) __attribute__((deprecated)); // integral type as wide as real_t / hal_float_t
 
 typedef volatile bool hal_bit_t;
 typedef volatile rtapi_u32 hal_u32_t;
 typedef volatile rtapi_s32 hal_s32_t;
 typedef volatile rtapi_u64 hal_u64_t;
 typedef volatile rtapi_s64 hal_s64_t;
-typedef volatile real_t hal_float_t;
-typedef volatile int hal_port_t;
+typedef volatile rtapi_real hal_float_t;
+typedef volatile rtapi_port hal_port_t;
        
 /** HAL "data union" structure
  ** This structure may hold any type of hal data
@@ -589,7 +589,8 @@ int hal_pin_new_sint(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_sint def
 int hal_pin_new_uint(int compid, hal_pdir_t dir, hal_uint_t *ref, rtapi_uint def, const char *fmt, ...) __HAL_PFMT(5,6);
 int hal_pin_new_real(int compid, hal_pdir_t dir, hal_real_t *ref, rtapi_real def, const char *fmt, ...) __HAL_PFMT(5,6);
 // Note: port has no initial default as it is an 'internal' reference
-//int hal_pin_new_port(int compid, hal_pin_dir_t dir, hal_port_t *ref, const char *fmt, ...) __HAL_PFMT(4,5);
+// FIXME: This needs to change into hal_port_t argument when we break the API
+int hal_pin_new_port(int compid, hal_pin_dir_t dir, hal_sint_t *ref, const char *fmt, ...) __HAL_PFMT(4,5);
 
 int hal_param_new_bool(int compid, hal_pdir_t dir, hal_bool_t *ref, rtapi_bool def, const char *fmt, ...) __HAL_PFMT(5,6);
 int hal_param_new_si32(int compid, hal_pdir_t dir, hal_sint_t *ref, rtapi_s32  def, const char *fmt, ...) __HAL_PFMT(5,6);
@@ -886,12 +887,12 @@ extern int hal_param_new(const char *name, hal_type_t type, hal_param_dir_t dir,
     On success, the hal_param_xxx_set() functions return 0,
     and on failure they return a negative error code.
 */
-extern int hal_param_bit_set(const char *name, int value);
-extern int hal_param_float_set(const char *name, double value);
-extern int hal_param_u32_set(const char *name, unsigned long value);
-extern int hal_param_s32_set(const char *name, signed long value);
-extern int hal_param_u64_set(const char *name, unsigned long value);
-extern int hal_param_s64_set(const char *name, signed long value);
+int hal_param_bit_set(const char *name, int value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_float_set(const char *name, double value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_u32_set(const char *name, unsigned long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_s32_set(const char *name, signed long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_u64_set(const char *name, unsigned long value) __attribute__((deprecated("Use hal_set_p()")));
+int hal_param_s64_set(const char *name, signed long value) __attribute__((deprecated("Use hal_set_p()")));
 
 /** 'hal_param_alias()' assigns an alternate name, aka an alias, to
     a parameter.  Once assigned, the parameter can be referred to by
@@ -915,7 +916,7 @@ extern int hal_param_alias(const char *pin_name, const char *alias);
     If successful, hal_param_set() returns 0.  On failure
     it returns a negative error code.
 */
-extern int hal_param_set(const char *name, hal_type_t type, void *value_addr);
+int hal_param_set(const char *name, hal_type_t type, void *value_addr) __attribute__((deprecated("Use hal_set_p()")));
 
 /***********************************************************************
 *                 PIN/SIG/PARAM GETTER FUNCTIONS                       *
@@ -930,7 +931,7 @@ extern int hal_param_set(const char *name, hal_type_t type, void *value_addr);
  */
 
 extern int hal_get_pin_value_by_name(
-    const char *name, hal_type_t *type, hal_data_u **data, bool *connected);
+    const char *name, hal_type_t *type, hal_data_u **data, bool *connected) __attribute__((deprecated("Use hal_get_p()")));
 
 /** 'hal_get_signal_value_by_name()' returns the value of any arbitrary HAL
  * signal by signal name.
@@ -941,7 +942,7 @@ extern int hal_get_pin_value_by_name(
  */
 
 extern int hal_get_signal_value_by_name(
-    const char *name, hal_type_t *type, hal_data_u **data, bool *has_writers);
+    const char *name, hal_type_t *type, hal_data_u **data, bool *has_writers) __attribute__((deprecated("Use hal_get_s()")));
 
 /** 'hal_get_param_value_by_name()' returns the value of any arbitrary HAL
  * parameter by parameter name.
@@ -951,7 +952,7 @@ extern int hal_get_signal_value_by_name(
  */
 
 extern int hal_get_param_value_by_name(
-    const char *name, hal_type_t *type, hal_data_u **data);
+    const char *name, hal_type_t *type, hal_data_u **data) __attribute__((deprecated("Use hal_get_p()")));
 
 
 /***********************************************************************
@@ -1110,7 +1111,7 @@ extern int hal_stop_threads(void);
     instance of its component.  Return value is >=0 for success,
     <0 for error.
 */
-typedef int(*constructor)(char *prefix, char *arg);
+typedef int(*constructor)(const char *prefix, const char *arg);
 
 /** hal_set_constructor() sets the constructor function for this component
 */

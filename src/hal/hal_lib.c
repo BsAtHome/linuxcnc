@@ -738,10 +738,10 @@ const char *hal_strerror(int err)
     }
 }
 
-char *hal_comp_name(int comp_id)
+const char *hal_comp_name(int comp_id)
 {
     hal_comp_t *comp;
-    char *result = NULL;
+    const char *result = NULL;
     halpr_mutex_acquire();
     comp = halpr_find_comp_by_id(comp_id);
     if(comp) result = comp->name;
@@ -1007,10 +1007,8 @@ int hal_pin_new_real(int compid, hal_pdir_t dir, hal_real_t *ref, rtapi_real def
     return 0;
 }
 
-#if 0
-// Must wait until switch
-// Note: port has no initial default as it is an 'internal' reference
-int hal_pin_new_port(int compid, hal_pdir_t dir, hal_port_t *ref, const char *fmt, ...)
+// FIXME: This needs to change into hal_port_t argument when we break the API
+int hal_pin_new_port(int compid, hal_pdir_t dir, hal_sint_t *ref, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -1018,7 +1016,6 @@ int hal_pin_new_port(int compid, hal_pdir_t dir, hal_port_t *ref, const char *fm
     va_end(ap);
     return ret;
 }
-#endif
 
 /* this is a generic function that does the majority of the work. */
 
@@ -2022,6 +2019,10 @@ int hal_param_new_fake(int compid, hal_refs_u *ref)
 
 /* wrapper functs for typed params - these call the generic funct below */
 
+// We don't want our library to emit the deprecation warning.
+// We already know it and need to provide them until removed.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 int hal_param_bit_set(const char *name, int value)
 {
     return hal_param_set(name, HAL_BIT, &value);
@@ -2051,6 +2052,7 @@ int hal_param_s64_set(const char *name, signed long value)
 {
     return hal_param_set(name, HAL_S64, &value);
 }
+#pragma GCC diagnostic pop
 
 /* this is a generic function that does the majority of the work */
 
@@ -2349,7 +2351,6 @@ int hal_export_funct(const char *name, void (*funct) (void *, long),
     int cmp;
     hal_funct_t *new, *fptr;
     hal_comp_t *comp;
-    char buf[HAL_NAME_LEN + 1];
 
     if (hal_data == NULL) {
 	rtapi_print_msg(RTAPI_MSG_ERR,
@@ -2447,25 +2448,25 @@ int hal_export_funct(const char *name, void (*funct) (void *, long),
     halpr_mutex_release();
 
     /* create a pin with the function's runtime in it */
-    if (hal_pin_s32_newf(HAL_OUT, &(new->runtime), comp_id,"%s.time",name)) {
-	rtapi_print_msg(RTAPI_MSG_ERR,
-	   "HAL: ERROR: fail to create pin '%s.time'\n", name);
+    if (hal_pin_new_si32(comp_id, HAL_OUT, &(new->runtime), 0, "%s.time", name) < 0) {
+	rtapi_print_msg(RTAPI_MSG_ERR, "HAL: ERROR: fail to create pin '%s.time'\n", name);
 	return -EINVAL;
     }
-    *(new->runtime) = 0;
 
     /* note that failure to successfully create the following params
        does not cause the "export_funct()" call to fail - they are
        for debugging and testing use only */
     /* create a parameter with the function's maximum runtime in it */
-    rtapi_snprintf(buf, sizeof(buf), "%s.tmax", name);
-    new->maxtime = 0;
-    hal_param_s32_new(buf, HAL_RW, &(new->maxtime), comp_id);
+    if(hal_param_new_si32(comp_id, HAL_RW, &(new->maxtime), 0, "%s.tmax", name) < 0) {
+	rtapi_print_msg(RTAPI_MSG_ERR, "HAL: ERROR: fail to create param '%s.tmax'\n", name);
+	return -EINVAL;
+    }
 
     /* create a parameter with the function's maximum runtime in it */
-    rtapi_snprintf(buf, sizeof(buf), "%s.tmax-increased", name);
-    new->maxtime_increased = 0;
-    hal_param_bit_new(buf, HAL_RO, &(new->maxtime_increased), comp_id);
+    if(hal_param_new_bool(comp_id, HAL_RO, &(new->maxtime_increased), 0, "%s.tmax-increased", name) < 0) {
+	rtapi_print_msg(RTAPI_MSG_ERR, "HAL: ERROR: fail to create param '%s.tmax-increased'\n", name);
+	return -EINVAL;
+    }
 
     return 0;
 }
@@ -2613,6 +2614,13 @@ int hal_create_thread(const char *name, unsigned long period_nsec, int uses_fp)
     /* insert new structure at head of list */
     new->next_ptr = hal_data->thread_list_ptr;
     hal_data->thread_list_ptr = SHMOFF(new);
+
+    // The counter that increases monotonically once every thread loop cycle.
+    // This is a 'fast' counter with normal access semantics. Separated from
+    // the param 'threadbeat' so it only needs to write _once_ to volatile
+    // memory instead of a very expensive read-modify-write cycle.
+    new->beatcnt = 0;
+
     /* done, release mutex */
     halpr_mutex_release();
 
@@ -2624,20 +2632,26 @@ int hal_create_thread(const char *name, unsigned long period_nsec, int uses_fp)
         return new->comp_id;
     }
 
-    rtapi_snprintf(buf, sizeof(buf), "%s.tmax", new->name);
-    new->maxtime = 0;
-    if (hal_param_s32_new(buf, HAL_RW, &(new->maxtime), new->comp_id)) {
+    if ((retval = hal_param_new_si32(new->comp_id, HAL_RW, &(new->maxtime), 0, "%s.tmax", new->name)) < 0) {
         rtapi_print_msg(RTAPI_MSG_ERR,
            "HAL: ERROR: fail to create param '%s.tmax'\n", new->name);
-        return -EINVAL;
+        return retval;
     }
 
-    if (hal_pin_s32_newf(HAL_OUT, &(new->runtime), new->comp_id,"%s.time",new->name)) {
+    if ((retval = hal_pin_new_si32(new->comp_id, HAL_OUT, &(new->runtime), 0, "%s.time", new->name)) < 0) {
         rtapi_print_msg(RTAPI_MSG_ERR,
            "HAL: ERROR: fail to create pin '%s.time'\n", new->name);
-        return -EINVAL;
+        return retval;
     }
-    *(new->runtime) = 0;
+
+    // A parameter that increases monotonically once every thread loop cycle.
+    // This way we can detect when a RT-cycle was completed from non-RT and
+    // prevent racy indeterministic sleep() constructs.
+    if((retval = hal_param_new_sint(new->comp_id, HAL_RO, &(new->threadbeat), 0, "%s.threadbeat", name)) < 0) {
+	rtapi_print_msg(RTAPI_MSG_ERR, "HAL: ERROR: fail to create param '%s.threadbeat'\n", name);
+	return retval;
+    }
+
     hal_ready(new->comp_id);
 
     rtapi_print_msg(RTAPI_MSG_DBG, "HAL: thread created\n");
@@ -3608,12 +3622,12 @@ static void thread_task(void *arg)
 		/* point to function structure */
 		funct = SHMPTR(funct_entry->funct_ptr);
 		/* update execution time data */
-		*(funct->runtime) = (hal_s32_t)(end_time - start_time);
-		if ( *(funct->runtime) > funct->maxtime) {
-		    funct->maxtime = *(funct->runtime);
-		    funct->maxtime_increased = 1;
+		rtapi_s32 runtime = hal_set_si32(funct->runtime, end_time - start_time);
+		if ( runtime > hal_get_si32(funct->maxtime)) {
+		    hal_set_si32(funct->maxtime, runtime);
+		    hal_set_bool(funct->maxtime_increased, 1);
 		} else {
-		    funct->maxtime_increased = 0;
+		    hal_set_bool(funct->maxtime_increased, 0);
 		}
 		/* point to next next entry in list */
 		funct_entry = SHMPTR(funct_entry->links.next);
@@ -3621,10 +3635,11 @@ static void thread_task(void *arg)
 		start_time = end_time;
 	    }
 	    /* update thread execution time */
-	    *(thread->runtime) = (hal_s32_t)(end_time - thread_start_time);
-	    if ( *(thread->runtime) > thread->maxtime) {
-	        thread->maxtime = *(thread->runtime);
+	    rtapi_s32 runtime = hal_set_si32(thread->runtime, end_time - thread_start_time);
+	    if ( runtime > hal_get_si32(thread->maxtime)) {
+	        hal_set_si32(thread->maxtime, runtime);
 	    }
+            hal_set_sint(thread->threadbeat, ++thread->beatcnt);
 	}
 	/* wait until next period */
 	rtapi_wait();
@@ -5121,7 +5136,7 @@ EXPORT_SYMBOL(hal_pin_new_ui32);
 EXPORT_SYMBOL(hal_pin_new_sint);
 EXPORT_SYMBOL(hal_pin_new_uint);
 EXPORT_SYMBOL(hal_pin_new_real);
-//EXPORT_SYMBOL(hal_pin_new_port);
+EXPORT_SYMBOL(hal_pin_new_port);
 
 EXPORT_SYMBOL(hal_pin_bit_new);
 EXPORT_SYMBOL(hal_pin_float_new);
@@ -5169,6 +5184,8 @@ EXPORT_SYMBOL(hal_param_new_uint);
 EXPORT_SYMBOL(hal_param_new_real);
 EXPORT_SYMBOL(hal_param_new_fake);
 
+// Parameter set functions have been deprecated.
+// Use the generic hal_set_p() instead.
 EXPORT_SYMBOL(hal_param_bit_set);
 EXPORT_SYMBOL(hal_param_float_set);
 EXPORT_SYMBOL(hal_param_u32_set);
@@ -5191,6 +5208,8 @@ EXPORT_SYMBOL(hal_del_funct_from_thread);
 EXPORT_SYMBOL(hal_start_threads);
 EXPORT_SYMBOL(hal_stop_threads);
 
+// All HAL lib internals' access has bee deprecated. All function prefixed with
+// halpr_ are only for private internal use.
 EXPORT_SYMBOL(hal_shmem_base);
 EXPORT_SYMBOL(halpr_find_comp_by_name);
 EXPORT_SYMBOL(halpr_find_pin_by_name);
@@ -5209,7 +5228,7 @@ EXPORT_SYMBOL(halpr_find_pin_by_sig);
 EXPORT_SYMBOL(hal_pin_alias);
 EXPORT_SYMBOL(hal_param_alias);
 
-EXPORT_SYMBOL(hal_port_alloc);
+EXPORT_SYMBOL(hal_port_alloc); // Deprecated
 EXPORT_SYMBOL(hal_port_read);
 EXPORT_SYMBOL(hal_port_peek);
 EXPORT_SYMBOL(hal_port_peek_commit);
