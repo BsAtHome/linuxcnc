@@ -23,6 +23,7 @@ print("lcnc_realtime.status " + str(lcnc_realtime.status()))
 
 == methods
 
+[[lcnc_realtime-verify]]
 lcnc_realtime.verify() -> bool::
 Returns a boolean to indicate whether the system is realtime capable.
 
