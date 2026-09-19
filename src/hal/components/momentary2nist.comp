@@ -45,6 +45,8 @@ author "David Mueller";
 FUNCTION(_)  {
 
     rtapi_bool in_val = in;
+    rtapi_bool on_val = on;
+    rtapi_bool off_val = off;
     rtapi_bool ison_val = is_on;
     rtapi_uint debounce_val = debounce;
 
@@ -52,7 +54,7 @@ FUNCTION(_)  {
         debounce_val = 2; // set a sane value
     }
 
-    if (in_val && state == 0 )  { // input has changed from debounced 0 -> 1
+    if (in_val && state == 0 )  { // input has changed from 0 -> 1
         debounce_cntr++;
         if ( debounce_cntr >= debounce_val ) {
             if (!ison_val) { // turn ON if it's off
@@ -65,13 +67,13 @@ FUNCTION(_)  {
             state = 1;
             debounce_cntr = 0;
         }
-    } else if (!in_val && state == 1) { // input has changed from debounced 1 -> 0
+    } else if (!in_val && state == 1) { // input has changed from 1 -> 0
         debounce_cntr++;
         if ( debounce_cntr >= debounce_val ) {
             state = 0;
             debounce_cntr = 0;
         }
-    } else if ((!ison_val && off) || (ison_val && on) || (pulse_length > max_pulse_length)) {
+    } else if ((!ison_val && off_val) || (ison_val && on_val) || (pulse_length > max_pulse_length)) {
         // reset outputs once device has switched or maximum pulse length is reached
         on_set(0);
         off_set(0);

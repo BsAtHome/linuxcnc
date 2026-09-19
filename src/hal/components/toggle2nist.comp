@@ -53,7 +53,7 @@ FUNCTION(_)  {
         debounce_val = 2; // set a sane value
     }
 
-    if (in_val && state == 0 )  { /* input has changed from debounced 0 -> 1 */
+    if (in_val && state == 0 )  { /* input has changed from 0 -> 1 */
         debounce_cntr++;
         if ( debounce_cntr >= debounce_val ) {
             if (!ison_val) { /* turn ON if it's off */
@@ -63,7 +63,7 @@ FUNCTION(_)  {
             state = 1;
             debounce_cntr = 0;
         }
-    } else if (!in_val && state == 1) { /* input has changed from debounced 1 -> 0 */
+    } else if (!in_val && state == 1) { /* input has changed from 1 -> 0 */
         debounce_cntr++;
         if ( debounce_cntr >= debounce_val ) {
             if (ison_val) { /* turn OFF if it's on */
@@ -73,7 +73,7 @@ FUNCTION(_)  {
             state = 0;
             debounce_cntr = 0;
         }
-    } else if ((!ison_val && off) || (ison_val && on) || (pulse_length > max_pulse_length)) {
+    } else if ((!ison_val && state == 0) || (ison_val && state == 1) || (pulse_length > max_pulse_length)) {
         // reset outputs once device has switched or maximum pulse length is reached
         on_set(0);
         off_set(0);
