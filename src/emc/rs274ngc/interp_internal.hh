@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <linuxcnc.h>
 #include <limits.h>
-#include <stdio.h>
 #include <set>
 #include <map>
 #include <vector>
@@ -28,8 +27,8 @@
 #include <boost/python/object_fwd.hpp>
 #include <cmath>
 #include "interp_parameter_def.hh"
-#include "interp_fwd.hh"
-#include "interp_base.hh"
+#include <rs274ngc/interp_fwd.hh>
+#include <rs274ngc/interp_base.hh>
 #include <axis_kinds.hh>
 
 

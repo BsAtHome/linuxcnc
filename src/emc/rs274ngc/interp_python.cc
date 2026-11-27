@@ -24,20 +24,13 @@
 #include <boost/python/str.hpp>
 namespace bp = boost::python;
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <exception>
 
-#include "rs274ngc.hh"
+#include <rs274ngc/rs274ngc.hh>
 #include "nml_intf/interp_return.hh"
 #include "interp_internal.hh"
 #include "rs274ngc_interp.hh"
+#include "interp_log.hh"
 
 extern    PythonPlugin *python_plugin;
 

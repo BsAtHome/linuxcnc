@@ -73,19 +73,7 @@ include an option for suppressing superfluous commands.
 #include <boost/python/list.hpp>
 #include <boost/python/scope.hpp>
 #include <boost/python/tuple.hpp>
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <stdarg.h>
 #include <sys/time.h>
-#include <time.h>
-#include <unistd.h>
-#include <libintl.h>
 #include <fstream>
 #include <memory>
 #include <set>
@@ -94,11 +82,12 @@ include an option for suppressing superfluous commands.
 #include <new>
 
 #include <inifile.hh>
-#include "rs274ngc.hh"
+#include <rs274ngc/rs274ngc.hh>
 #include "rs274ngc_return.hh"
 #include "interp_internal.hh"	// interpreter private definitions
 #include "interp_queue.hh"
 #include "rs274ngc_interp.hh"
+#include "interp_log.hh"
 #include <wordexp.h>
 #include "units.h"
 

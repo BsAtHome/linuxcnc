@@ -10,25 +10,16 @@
  * Copyright (c) 2011 All rights reserved.
  *
  ********************************************************************/
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #define BOOST_PYTHON_MAX_ARITY 4
 #include "pythonplugin/python_plugin.hh"
 #include "interp_python.hh"
 #include <boost/python/list.hpp>
 namespace bp = boost::python;
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include "rs274ngc.hh"
+#include <rs274ngc/rs274ngc.hh>
 #include "rs274ngc_interp.hh"
 #include "interp_internal.hh"
+#include "interp_log.hh"
 
 #include <string>
 #include <string_view>

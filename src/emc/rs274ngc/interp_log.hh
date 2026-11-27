@@ -1,35 +1,17 @@
-/********************************************************************
-* Description: rs274ngc.hh
-*
-*   Derived from a work by Thomas Kramer
-*
-* Author:
-* License: GPL Version 2
-* System: Linux
-*    
-* Copyright (c) 2004 All rights reserved.
-*
-********************************************************************/
-#ifndef RS274NGC_HH
-#define RS274NGC_HH
+//
+// These defines were moved from the rs274ngc.hh header to here because they
+// are private to the interpreter. External programs should not use this.
+//
+// Original header states:
+// Derived from a work by Thomas Kramer
+// License: GPL Version 2
+// System: Linux
+// Copyright (c) 2004 All rights reserved.
+//
+#ifndef RS274NGC_INTERP_LOG_HH
+#define RS274NGC_INTERP_LOG_HH
 
-#include "interp_base.hh"
-
-
-
-/**********************/
-/* INCLUDE DIRECTIVES */
-/**********************/
-
-#include <stdio.h>
-#include <nml_intf/canon.hh>
-#include <nml_intf/emc.hh>
 #include <nml_intf/debugflags.h>
-#include "interp_fwd.hh"
-
-// Declare class so that we can use it in the typedef.
-class Interp;
-typedef int (Interp::*read_function_pointer) (char *, int *, block_pointer, double *);
 
 #define DBG(level,fmt,args...)                  \
     do {                                        \
@@ -76,7 +58,6 @@ typedef int (Interp::*read_function_pointer) (char *, int *, block_pointer, doub
 // log always
 #define Log(fmt, args...)       _logDebug(EMC_DEBUG_UNCONDITIONAL,LOG_PID|LOG_FILENAME,-1,fmt, ## args)
 #define Error(fmt, args...)       _logDebug(EMC_DEBUG_UNCONDITIONAL,0,-1,fmt, ## args)
-
 
 
 #endif

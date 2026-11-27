@@ -20,7 +20,6 @@
 #ifndef BOOST_PYTHON_MAX_ARITY
 #define BOOST_PYTHON_MAX_ARITY 4
 #endif
-#include <string.h>
 #include "rs274ngc_interp.hh"
 #include <boost/python/object.hpp>
 

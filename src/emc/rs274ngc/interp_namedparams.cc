@@ -15,10 +15,6 @@
 
 #include "config.h"
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #define BOOST_PYTHON_MAX_ARITY 4
 #include "pythonplugin/python_plugin.hh"
 #include <boost/python/dict.hpp>
@@ -27,22 +23,15 @@
 #include <boost/python/tuple.hpp>
 namespace bp = boost::python;
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sstream>
 #include <string>
 #include <map>
 
-#include "rs274ngc.hh"
+#include <rs274ngc/rs274ngc.hh>
 #include "rs274ngc_return.hh"
 #include "interp_internal.hh"
 #include "rs274ngc_interp.hh"
+#include "interp_log.hh"
 #include <inifile.hh>
 
 // ENOENT, for a HAL name not found

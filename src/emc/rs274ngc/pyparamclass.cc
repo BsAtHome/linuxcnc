@@ -27,11 +27,7 @@
 namespace bp = boost::python;
 extern int _task;  // zero in gcodemodule, 1 in milltask
 
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
-
-#include "rs274ngc.hh"
+#include <rs274ngc/rs274ngc.hh>
 #include "nml_intf/interp_return.hh"
 #include "interp_internal.hh"
 #include "rs274ngc_interp.hh"
